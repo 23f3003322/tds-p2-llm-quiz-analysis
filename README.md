@@ -11,7 +11,7 @@ pinned: false
 
 Check out the configuration reference at [https://huggingface.co/docs/hub/spaces-config-reference](https://huggingface.co/docs/hub/spaces-config-reference)
 
-## LLM Code Deployment API
+## LLM Code quiz API
 
 This Space provides a production-grade FastAPI backend for automated application generation and deployment, as described in the LLM Code Deployment project. It supports secure secret-based access, LLM-driven app generation, automated deployment to GitHub Pages, and evaluation callbacks—built with best practices for industry and Hugging Face Spaces Docker deployments.
 
