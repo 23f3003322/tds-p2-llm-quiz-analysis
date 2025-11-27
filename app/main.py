@@ -12,7 +12,7 @@ from app.core.logging import setup_logging, get_logger
 from app.core.exceptions import register_exception_handlers
 from app.middleware.logging import LoggingMiddleware
 from app.api.routes import task, health
-
+from app.core.logging import setup_logging, get_logger
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -20,29 +20,21 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager for startup and shutdown events
-    """
+    """Application lifespan with log flushing"""
     # Startup
     logger.info("=" * 80)
     logger.info("🚀 Starting LLM Analysis Quiz API")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
-    logger.info(f"Version: {settings.APP_VERSION}")
-    logger.info(f"Secret configured: {settings.is_secret_configured()}")
     logger.info("=" * 80)
     
-    if not settings.is_secret_configured():
-        logger.warning("⚠️  WARNING: API_SECRET not configured!")
-    
+
     yield
     
     # Shutdown
     logger.info("=" * 80)
-    logger.info("🛑 Shutting down LLM Analysis Quiz API")
+    logger.info("🛑 Shutting down - flushing logs")
     logger.info("=" * 80)
-
-
-
+    
 def create_application() -> FastAPI:
     """
     Application factory pattern for creating FastAPI instance

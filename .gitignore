@@ -1,3 +1,39 @@
 .env
 logs
 venv
+# Credentials and secrets
+*.json
+service-account*.json
+gcp-credentials.json
+*.pem
+*.key
+
+tests
+# Environment files
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+

@@ -1,18 +1,18 @@
 """
 Application Configuration Management
-Centralizes all environment variables and settings
 """
 
 import os
-from typing import List
+import json
+import base64
+import tempfile
+from typing import List,Optional
 from pydantic_settings import BaseSettings
-from pydantic import  Field
+from pydantic import Field
 
 
 class Settings(BaseSettings):
-    """
-    Application settings loaded from environment variables
-    """
+    """Application settings loaded from environment variables"""
     
     # Application
     APP_NAME: str = "LLM Analysis Quiz API"
@@ -26,31 +26,32 @@ class Settings(BaseSettings):
     
     # Security
     API_SECRET: str = Field(default="", env="API_SECRET")
-    ALLOWED_ORIGINS: List[str] = Field(
-        default=["*"],
-        env="ALLOWED_ORIGINS"
-    )
+    ALLOWED_ORIGINS: List[str] = Field(default=["*"], env="ALLOWED_ORIGINS")
     
     # Logging
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
     LOG_DIR: str = Field(default="logs", env="LOG_DIR")
-    # Cloud Logging
-    LOGTAIL_SOURCE_TOKEN: str = Field(default="", env="LOGTAIL_SOURCE_TOKEN")
+    
+    # Google Cloud Logging
+    GOOGLE_CLOUD_PROJECT: str = Field(default="", env="GOOGLE_CLOUD_PROJECT")
+    GOOGLE_CREDENTIALS_BASE64: str = Field(
+        default="",
+        env="GOOGLE_CREDENTIALS_BASE64",
+        description="Base64-encoded service account JSON"
+    )
 
+    ENABLE_CLOUD_LOGGING: bool = Field(default=True, env="ENABLE_CLOUD_LOGGING")
     
     # Task Processing
-    TASK_TIMEOUT: int = Field(default=300, env="TASK_TIMEOUT")  # 5 minutes
+    TASK_TIMEOUT: int = Field(default=300, env="TASK_TIMEOUT")
     MAX_RETRIES: int = Field(default=3, env="MAX_RETRIES")
     
-    # External APIs (to be added as needed)
+    # External APIs
     OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = Field(default="", env="ANTHROPIC_API_KEY")
-    
-    # Database (for future use)
-    DATABASE_URL: str = Field(default="", env="DATABASE_URL")
-    
-    # Redis (for caching, future use)
-    REDIS_URL: str = Field(default="", env="REDIS_URL")
+
+    # Internal (set automatically)
+    _credentials_path: Optional[str] = None
     
     class Config:
         env_file = ".env"
@@ -68,7 +69,69 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         """Check if running in development"""
         return self.ENVIRONMENT.lower() == "development"
+    
+    def is_cloud_logging_enabled(self) -> bool:
+        """Check if Google Cloud Logging is properly configured"""
+        return (
+            self.ENABLE_CLOUD_LOGGING and
+            bool(self.GOOGLE_CLOUD_PROJECT) and
+            bool(self.GOOGLE_CREDENTIALS_BASE64)
+        )
+    
+    def get_credentials_path(self) -> Optional[str]:
+        """
+        Get the path to Google Cloud credentials file
+        Decodes base64 credentials and writes to temp file
+        
+        Returns:
+            str: Path to credentials file or None
+        """
+        # Return cached path if already set
+        if self._credentials_path and os.path.exists(self._credentials_path):
+            return self._credentials_path
+        
+        if not self.GOOGLE_CREDENTIALS_BASE64:
+            return None
+        
+        try:
+            # Decode base64 credentials
+            credentials_json = base64.b64decode(
+                self.GOOGLE_CREDENTIALS_BASE64
+            ).decode('utf-8')
+            
+            # Verify it's valid JSON
+            json.loads(credentials_json)
+            
+            # Write to temporary file
+            temp_dir = tempfile.gettempdir()
+            creds_path = os.path.join(temp_dir, 'gcp-credentials.json')
+            
+            with open(creds_path, 'w') as f:
+                f.write(credentials_json)
+            
+            # Set environment variable for Google Cloud libraries
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = creds_path
+            
+            # Cache the path
+            self._credentials_path = creds_path
+            
+            print(f"✓ Google credentials decoded: {creds_path}")
+            return creds_path
+            
+        except base64.binascii.Error:
+            print("✗ Invalid base64 encoding in GOOGLE_CREDENTIALS_BASE64")
+            return None
+        except json.JSONDecodeError:
+            print("✗ Invalid JSON in decoded credentials")
+            return None
+        except Exception as e:
+            print(f"✗ Failed to setup Google credentials: {e}")
+            return None
 
 
 # Global settings instance
 settings = Settings()
+
+# Setup credentials immediately when config is loaded
+if settings.GOOGLE_CREDENTIALS_BASE64:
+    settings.get_credentials_path()

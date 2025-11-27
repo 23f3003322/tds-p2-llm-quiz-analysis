@@ -5,7 +5,8 @@ pydantic
 pydantic-settings
 pydantic[email]
 python-dotenv==1.0.0
-logtail-python
+# Google Cloud Logging
+google-cloud-logging==3.9.0
 
 # HTTP Clients
 httpx==0.26.0

@@ -6,9 +6,8 @@ Endpoints for monitoring application health
 from fastapi import APIRouter
 
 from app.core.config import settings
-from app.core.logging import get_logger
 from app.models.response import HealthResponse
-
+from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
@@ -20,6 +19,7 @@ async def root():
     Root endpoint - basic health check
     """
     logger.debug("Root endpoint accessed")
+
     return {
         "status": "online",
         "service": settings.APP_NAME,
@@ -33,7 +33,7 @@ async def health_check():
     Detailed health check endpoint
     """
     logger.debug("Health check requested")
-    
+
     return HealthResponse(
         status="healthy",
         environment=settings.ENVIRONMENT,
