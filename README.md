@@ -1,10 +1,9 @@
 ---
 title: LLM QUIZ ANALYSIS API
 emoji: 🚀
-colorFrom: indigo
+colorFrom: purple
 colorTo: blue
 sdk: docker
-sdk_version: "0.0.1"
 pinned: false
 ---
 
