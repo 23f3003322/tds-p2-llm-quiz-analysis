@@ -44,6 +44,7 @@ class OutputFormat(str, Enum):
     EXCEL = "excel"
     HTML = "html"
     PDF = "pdf"
+    FILE = "file"
     UNKNOWN = "unknown"
 
 
