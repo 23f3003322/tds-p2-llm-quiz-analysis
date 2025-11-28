@@ -24,6 +24,8 @@ Pillow
 # PDF Processing
 PyPDF2==3.0.1
 
+faster-whisper
+
 # Data Processing
 # pandas==2.2.0
 # numpy==1.26.3

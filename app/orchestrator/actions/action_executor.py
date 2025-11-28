@@ -150,27 +150,21 @@ class ActionExecutor:
         return results
     
     async def _handle_ocr(self, urls: List[str]) -> List[str]:
-        """Handle OCR on images"""
-        logger.info(f"🖼️  Processing OCR URLs")
-        
         results = []
         
         for url in urls:
-            if not self._is_image(url):
-                continue
+            ocr_result = await self.image_processor.extract_text_from_image(url)
             
-            try:
-                ocr_result = await self.image_processor.extract_text_from_image(url)
-                results.append(
-                    f"\n\nText extracted from image {url}:\n{ocr_result['extracted_text']}"
-                )
-                
-            except Exception as e:
-                logger.error(f"Failed to OCR {url}: {e}")
-                results.append(f"\n\n[Failed to extract text from {url}: {str(e)}]")
+            if ocr_result['status'] == 'success':
+                results.append(f"\nText from {url}:\n{ocr_result['extracted_text']}")
+            elif ocr_result['status'] == 'unavailable':
+                results.append(f"\n[Image at {url} - OCR not configured]")
+            else:
+                results.append(f"\n[OCR failed for {url}]")
         
         return results
-    
+
+
     async def _handle_navigation(self, urls: List[str]) -> List[str]:
         """Handle navigation to additional URLs"""
         logger.info(f"🌐 Processing navigation URLs")
