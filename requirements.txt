@@ -7,6 +7,7 @@ pydantic[email]
 python-dotenv==1.0.0
 # Google Cloud Logging
 google-cloud-logging==3.9.0
+google-cloud-vision
 httpx
 beautifulsoup4
 lxml
@@ -16,6 +17,12 @@ pydantic-ai
 # HTTP Clients
 httpx==0.26.0
 requests==2.31.0
+
+# Image Processing (lightweight only)
+Pillow
+
+# PDF Processing
+PyPDF2==3.0.1
 
 # Data Processing
 # pandas==2.2.0

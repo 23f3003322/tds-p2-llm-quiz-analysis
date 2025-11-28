@@ -10,6 +10,7 @@ from app.core.logging import get_logger
 from app.core.exceptions import TaskProcessingError
 from app.services.task_fetcher import TaskFetcher
 from app.orchestrator.classifier import TaskClassifier
+from app.orchestrator.actions.action_executor import ActionExecutor
 
 logger = get_logger(__name__)
 
@@ -22,6 +23,7 @@ class TaskProcessor:
     
     def __init__(self):
         self.classifier = TaskClassifier()
+        self.action_executor = ActionExecutor()
         logger.debug("TaskProcessor initialized with classifier")
     
     async def process(self, task_data: TaskRequest) -> Dict[str, Any]:
@@ -70,16 +72,32 @@ class TaskProcessor:
                 f"Complexity: {classification.complexity.value}"
             )
             
-            # TODO: Step 3 - Execute task based on classification
+        # Step 3: Execute actions if needed
+            task_description = task_info['task_description']
+            
+            if content_analysis and not content_analysis.is_direct_task:
+                logger.info("=" * 60)
+                logger.info("STEP 3: Executing Actions")
+                logger.info("=" * 60)
+                
+                task_description = await self.action_executor.execute_actions(
+                    content_analysis,
+                    task_description
+                )
+                
+                logger.info(f"✅ Actions executed | Task description length: {len(task_description)} chars")
+            else:
+                logger.info("Step 3: No actions required, task is direct")
+            
+            # TODO: Step 4 - Execute task based on classification
             # For now, return classification results
             
-            # Prepare result
             result = {
                 'status': 'classified',
                 'email': task_data.email,
                 'task_url': str(task_data.url),
-                'task_description': task_info['task_description'],
-                'content_type': task_info['content_type'],
+                'task_description': task_description,
+                'original_content_type': task_info['content_type'],
                 'classification': {
                     'primary_task': classification.primary_task.value,
                     'secondary_tasks': [t.value for t in classification.secondary_tasks],
@@ -95,7 +113,7 @@ class TaskProcessor:
                     'suggested_tools': classification.suggested_tools
                 },
                 'metadata': task_info.get('metadata', {}),
-                'message': 'Task fetched and classified. Execution pending (Step 4+).'
+                'message': 'Task fetched, classified, and actions executed. Task execution pending (Step 4+).'
             }
             
             # Add content analysis if performed
@@ -107,12 +125,16 @@ class TaskProcessor:
                     'requires_ocr': content_analysis.requires_ocr,
                     'requires_navigation': content_analysis.requires_navigation,
                     'confidence': content_analysis.confidence,
-                    'reasoning': content_analysis.reasoning
+                    'reasoning': content_analysis.reasoning,
+                    'actions_executed': not content_analysis.is_direct_task
                 }
             
             logger.info("=" * 60)
-            logger.info("✅ Task processing completed (fetch + classify stages)")
+            logger.info("✅ Task processing completed (fetch + classify + actions stages)")
             logger.info("=" * 60)
+            
+            # Cleanup
+            self.action_executor.cleanup()
             
             return result
         
