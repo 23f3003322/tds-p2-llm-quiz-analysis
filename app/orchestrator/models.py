@@ -41,6 +41,7 @@ class OutputFormat(str, Enum):
     CSV = "csv"
     IMAGE = "image"
     CHART = "chart"
+    EXCEL = "excel"
     HTML = "html"
     PDF = "pdf"
     UNKNOWN = "unknown"
