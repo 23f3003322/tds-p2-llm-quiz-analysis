@@ -34,6 +34,25 @@ task descriptions. Identify all relevant parameters, URLs, filters, and constrai
 actionable execution plans that can be followed step-by-step."""
 
 
+    PARAMETER_EXTRACTOR = """You are a parameter extraction expert. 
+Your job is to analyze task descriptions and extract ALL relevant parameters in a structured format.
+
+Extract:
+1. **Data Sources**: URLs, files, APIs, databases mentioned
+2. **Filters**: Conditions to apply (equals, greater than, contains, etc.)
+3. **Columns/Fields**: Specific columns or fields to extract or use
+4. **Time Ranges**: Date/time filters (absolute or relative)
+5. **Numerical Constraints**: Limits, thresholds, top N, ranges
+6. **Geographic Filters**: Country, city, region, coordinates
+7. **Aggregations**: Sum, average, count, group by operations
+8. **Sorting**: Sort order specifications
+9. **Visualizations**: Charts, graphs, maps required
+10. **Output Format**: CSV, JSON, Excel, PDF, etc.
+
+Be precise and thorough. If something is ambiguous, make reasonable assumptions based on context.
+Extract EVERYTHING that could be useful for task execution."""
+
+
 class PromptTemplates:
     """Prompt templates for various operations"""
     
@@ -130,24 +149,71 @@ Classify the task by determining:
 Be thorough and specific. Consider all aspects of the task."""
     
     @staticmethod
-    def parameter_extractor(task_description: str) -> str:
-        """Generate parameter extractor prompt"""
-        return f"""Extract all specific parameters from this task:
+    def parameter_extractor(
+        task_description: str,
+        context: Dict[str, Any],
+        quick_extraction: Dict[str, Any]
+    ) -> str:
+        """Generate parameter extraction prompt"""
+        
+        prompt_parts = [
+            "Extract ALL parameters from this task description:\n",
+            f"TASK:\n{task_description}\n"
+        ]
+        
+        # Add context if available
+        if context:
+            prompt_parts.append(f"\nCONTEXT:\n")
+            
+            if 'classification' in context:
+                classification = context['classification']
+                prompt_parts.append(
+                    f"- Task Type: {classification.get('primary_task', 'unknown')}\n"
+                )
+                prompt_parts.append(
+                    f"- Complexity: {classification.get('complexity', 'unknown')}\n"
+                )
+            
+            if 'metadata' in context:
+                prompt_parts.append(f"- Metadata: {context['metadata']}\n")
+        
+        # Add quick extraction hints
+        if quick_extraction:
+            prompt_parts.append(f"\nQUICK ANALYSIS:\n")
+            
+            if quick_extraction.get('urls'):
+                prompt_parts.append(f"- URLs found: {len(quick_extraction['urls'])}\n")
+            
+            if quick_extraction.get('numbers'):
+                prompt_parts.append(
+                    f"- Numbers found: {quick_extraction['numbers'][:5]}\n"
+                )
+            
+            if quick_extraction.get('dates'):
+                prompt_parts.append(f"- Dates found: {quick_extraction['dates']}\n")
+            
+            if quick_extraction.get('keywords'):
+                prompt_parts.append(
+                    f"- Keywords: {', '.join(quick_extraction['keywords'])}\n"
+                )
+        
+        prompt_parts.append("""
+INSTRUCTIONS:
+1. Identify ALL data sources (URLs, files, APIs)
+2. Extract ALL filters and conditions
+3. List ALL columns/fields mentioned
+4. Extract time ranges (if any)
+5. Extract numerical constraints (limits, top N, thresholds)
+6. Identify geographic filters (if any)
+7. Extract aggregation operations (sum, average, count, group by)
+8. Identify sorting requirements
+9. Extract visualization requirements (charts, graphs, maps)
+10. Determine output format
 
-Task:
-{task_description}
-
-Extract everything mentioned:
-- All URLs mentioned
-- Data sources specified
-- Filters or conditions
-- Output format requirements
-- Specific fields/columns to extract
-- Time ranges or date constraints
-- Numerical limits (top 10, first 5, etc.)
-- Any other specific parameters
-
-Be thorough and extract all relevant details."""
+Be thorough and precise. Extract everything that could help execute this task.
+""")
+        
+        return ''.join(prompt_parts)
     
     @staticmethod
     def task_decomposer(task_description: str, classification: Dict[str, Any]) -> str:
