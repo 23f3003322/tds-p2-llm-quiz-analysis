@@ -41,6 +41,45 @@ class Settings(BaseSettings):
     )
 
     ENABLE_CLOUD_LOGGING: bool = Field(default=True, env="ENABLE_CLOUD_LOGGING")
+
+    # LLM Configuration (AIPipe)
+    AIPIPE_TOKEN: str = Field(
+        default="",
+        env="AIPIPE_TOKEN",
+        description="AIPipe authentication token"
+    )
+    AIPIPE_BASE_URL: str = Field(
+        default="https://aipipe.org/openrouter/v1",
+        env="AIPIPE_BASE_URL",
+        description="AIPipe base URL (openrouter or openai)"
+    )
+    LLM_DEFAULT_MODEL: str = Field(
+        default="google/gemini-2.0-flash-lite-001",
+        env="LLM_DEFAULT_MODEL",
+        description="Default LLM model to use"
+    )
+    LLM_TEMPERATURE: float = Field(
+        default=0.7,
+        env="LLM_TEMPERATURE",
+        description="LLM temperature for generation"
+    )
+    LLM_MAX_TOKENS: int = Field(
+        default=2000,
+        env="LLM_MAX_TOKENS",
+        description="Maximum tokens in LLM response"
+    )
+    LLM_TIMEOUT: int = Field(
+        default=60,
+        env="LLM_TIMEOUT",
+        description="LLM request timeout in seconds"
+    )
+    
+    USE_PYDANTIC_AI: bool = Field(
+        default=True,
+        env="USE_PYDANTIC_AI",
+        description="Use Pydantic AI for structured outputs"
+    )
+    
     
     # Task Processing
     TASK_TIMEOUT: int = Field(default=300, env="TASK_TIMEOUT")
@@ -69,6 +108,10 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         """Check if running in development"""
         return self.ENVIRONMENT.lower() == "development"
+    
+    def is_llm_configured(self) -> bool:
+        """Check if LLM is properly configured"""
+        return bool(self.AIPIPE_TOKEN and self.AIPIPE_TOKEN.strip())
     
     def is_cloud_logging_enabled(self) -> bool:
         """Check if Google Cloud Logging is properly configured"""

@@ -1,6 +1,6 @@
 """
 Task Processing Service
-Business logic for processing tasks
+Updated to use Task Classifier
 """
 
 from typing import Dict, Any
@@ -8,6 +8,8 @@ from typing import Dict, Any
 from app.models.request import TaskRequest
 from app.core.logging import get_logger
 from app.core.exceptions import TaskProcessingError
+from app.services.task_fetcher import TaskFetcher
+from app.orchestrator.classifier import TaskClassifier
 
 logger = get_logger(__name__)
 
@@ -15,41 +17,108 @@ logger = get_logger(__name__)
 class TaskProcessor:
     """
     Service class for processing tasks
-    Handles the core business logic
+    Coordinates task fetching, classification, and execution
     """
     
     def __init__(self):
-        logger.debug("TaskProcessor initialized")
+        self.classifier = TaskClassifier()
+        logger.debug("TaskProcessor initialized with classifier")
     
     async def process(self, task_data: TaskRequest) -> Dict[str, Any]:
         """
         Process a task based on the provided data
+        Now includes classification
         
         Args:
             task_data: Validated task request
             
         Returns:
-            Dict containing task results
+            Dict containing task results with classification
             
         Raises:
             TaskProcessingError: If processing fails
         """
-        logger.info(f"Processing task for: {task_data.email}")
-        logger.info(f"Task URL: {task_data.url}")
+        logger.info(f"🔄 Processing task for: {task_data.email}")
+        logger.info(f"📋 Task URL: {task_data.url}")
         
         try:
-            # TODO: Implement actual task processing logic
-            # This will integrate with orchestrator and various modules
+            # Step 1: Fetch task description from URL
+            logger.info("=" * 60)
+            logger.info("STEP 1: Fetching Task")
+            logger.info("=" * 60)
             
+            async with TaskFetcher() as fetcher:
+                task_info = await fetcher.fetch_task(str(task_data.url))
+            
+            logger.info(
+                f"✅ Task fetched | Type: {task_info['content_type']} | "
+                f"Needs LLM: {task_info.get('needs_llm_analysis', False)}"
+            )
+            
+            # Step 2: Classify task (includes content analysis if needed)
+            logger.info("=" * 60)
+            logger.info("STEP 2: Classifying Task")
+            logger.info("=" * 60)
+            
+            content_analysis, classification = await self.classifier.classify_with_content_check(
+                task_info
+            )
+            
+            logger.info(
+                f"✅ Classification complete | "
+                f"Primary: {classification.primary_task.value} | "
+                f"Complexity: {classification.complexity.value}"
+            )
+            
+            # TODO: Step 3 - Execute task based on classification
+            # For now, return classification results
+            
+            # Prepare result
             result = {
-                "status": "processed",
-                "task_url": str(task_data.url),
-                "message": "Task processing logic to be implemented",
-                "email": task_data.email
+                'status': 'classified',
+                'email': task_data.email,
+                'task_url': str(task_data.url),
+                'task_description': task_info['task_description'],
+                'content_type': task_info['content_type'],
+                'classification': {
+                    'primary_task': classification.primary_task.value,
+                    'secondary_tasks': [t.value for t in classification.secondary_tasks],
+                    'complexity': classification.complexity.value,
+                    'estimated_steps': classification.estimated_steps,
+                    'requires_javascript': classification.requires_javascript,
+                    'requires_authentication': classification.requires_authentication,
+                    'requires_external_data': classification.requires_external_data,
+                    'output_format': classification.output_format.value,
+                    'confidence': classification.confidence,
+                    'reasoning': classification.reasoning,
+                    'key_entities': classification.key_entities,
+                    'suggested_tools': classification.suggested_tools
+                },
+                'metadata': task_info.get('metadata', {}),
+                'message': 'Task fetched and classified. Execution pending (Step 4+).'
             }
             
-            logger.info("✅ Task processed successfully")
+            # Add content analysis if performed
+            if content_analysis:
+                result['content_analysis'] = {
+                    'is_direct_task': content_analysis.is_direct_task,
+                    'requires_download': content_analysis.requires_download,
+                    'requires_transcription': content_analysis.requires_transcription,
+                    'requires_ocr': content_analysis.requires_ocr,
+                    'requires_navigation': content_analysis.requires_navigation,
+                    'confidence': content_analysis.confidence,
+                    'reasoning': content_analysis.reasoning
+                }
+            
+            logger.info("=" * 60)
+            logger.info("✅ Task processing completed (fetch + classify stages)")
+            logger.info("=" * 60)
+            
             return result
+        
+        except TaskProcessingError:
+            # Re-raise task processing errors
+            raise
         
         except Exception as e:
             logger.error(f"❌ Task processing failed: {str(e)}", exc_info=True)

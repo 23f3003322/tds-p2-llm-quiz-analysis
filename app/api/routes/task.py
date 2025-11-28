@@ -12,13 +12,15 @@ from app.api.dependencies import verify_authentication
 from app.services.task_processor import TaskProcessor
 from app.core.logging import get_logger
 
+import requests
+
 logger = get_logger(__name__)
 
 router = APIRouter()
 task_processor = TaskProcessor()
 
 
-@router.post("/api/", response_model=TaskResponse, status_code=status.HTTP_200_OK)
+@router.post("/task", response_model=TaskResponse, status_code=status.HTTP_200_OK)
 async def handle_task(request: Request):
     """
     Main API endpoint for handling task requests
