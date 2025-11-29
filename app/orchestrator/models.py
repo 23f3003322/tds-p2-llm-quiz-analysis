@@ -48,6 +48,124 @@ class OutputFormat(str, Enum):
     UNKNOWN = "unknown"
 
 
+class URLDetection(BaseModel):
+    """Result of URL detection analysis"""
+    
+    is_redirect: bool = Field(
+        description="True if content redirects to another URL for the actual task"
+    )
+    
+    question_url: Optional[str] = Field(
+        default=None,
+        description="The URL to visit for the actual task (if is_redirect is True)"
+    )
+    
+    reasoning: str = Field(
+        description="Detailed explanation of why this is or isn't a redirect"
+    )
+    
+    url_types: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Classification of each URL found (e.g., 'question_url', 'data_url', 'submission_url')"
+    )
+    
+    confidence: str = Field(
+        default="medium",
+        description="Confidence level: low, medium, high"
+    )
+
+
+class InstructionStep(BaseModel):
+    """Single instruction step"""
+    
+    step_number: int = Field(
+        description="Step number in sequence (1, 2, 3...)"
+    )
+    
+    action: str = Field(
+        description="Primary action: scrape, extract, calculate, submit, download, transcribe, analyze, visit"
+    )
+    
+    description: str = Field(
+        description="Clear description of what to do in this step"
+    )
+    
+    target: Optional[str] = Field(
+        default=None,
+        description="Target of the action (URL, field name, file, etc.)"
+    )
+    
+    dependencies: List[int] = Field(
+        default_factory=list,
+        description="Step numbers this step depends on"
+    )
+
+
+class UnifiedTaskAnalysis(BaseModel):
+    """
+    Unified analysis for task fetching
+    Combines redirect detection, submission URL extraction, and instruction parsing
+    """
+    
+    # ========================================================================
+    # REDIRECT DETECTION
+    # ========================================================================
+    is_redirect: bool = Field(
+        description="True if this content redirects to another URL for the actual task"
+    )
+    
+    question_url: Optional[str] = Field(
+        default=None,
+        description="URL to visit for the actual task (if is_redirect=True)"
+    )
+    
+    redirect_reasoning: str = Field(
+        default="",
+        description="Why this is or isn't a redirect"
+    )
+    
+    # ========================================================================
+    # SUBMISSION URL EXTRACTION
+    # ========================================================================
+    submission_url: Optional[str] = Field(
+        default=None,
+        description="URL where the final answer should be POSTed"
+    )
+    
+    submission_url_is_relative: bool = Field(
+        default=False,
+        description="True if submission URL is relative and needs base URL resolution"
+    )
+    
+    submission_reasoning: str = Field(
+        default="",
+        description="How the submission URL was identified"
+    )
+    
+    # ========================================================================
+    # INSTRUCTION PARSING
+    # ========================================================================
+    instructions: List[InstructionStep] = Field(
+        default_factory=list,
+        description="Parsed step-by-step instructions (empty if redirect)"
+    )
+    
+    overall_goal: str = Field(
+        description="High-level summary of what needs to be accomplished"
+    )
+    
+    complexity: str = Field(
+        description="Task complexity: trivial, simple, moderate, complex"
+    )
+    
+    # ========================================================================
+    # CONFIDENCE
+    # ========================================================================
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Overall confidence (0.0-1.0)"
+    )
 class TaskClassification(BaseModel):
     """
     Structured output for task classification

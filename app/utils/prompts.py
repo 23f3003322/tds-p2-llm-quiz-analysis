@@ -54,7 +54,84 @@ Extract EVERYTHING that could be useful for task execution."""
 
 class AnalysisPrompts:
     """Prompts for data analysis and insight generation"""
-    
+    @staticmethod
+    def unified_content_analysis_prompt(
+        task_description: str,
+        found_urls: List[str],
+        current_url: str,
+        base_url: str
+    ) -> str:
+        """Optimized unified analysis prompt"""
+        urls_text = "\n".join(f"- {url}" for url in found_urls) if found_urls else "None"
+        
+        return f"""Analyze this quiz/task content and extract all critical information.
+
+    **Current URL:** {current_url}
+    **Base URL:** {base_url}
+
+    **Content:**
+    {task_description}
+
+    **URLs found:**
+    {urls_text}
+
+    ---
+
+    ## EXTRACT:
+
+    ### 1. SUBMISSION URL (Priority #1)
+    Where to POST the final answer.
+
+    **Search for:** "POST to", "submit to", "send to", "answer to"
+    **Extract from:** Text, markdown links `[text](URL)`, relative paths `/submit`
+    **Set submission_url_is_relative=True** if starts with `/`
+
+    ### 2. REDIRECT DETECTION
+    **is_redirect=True** if content says "visit URL" or "task at URL" (directs elsewhere)
+    **is_redirect=False** if content IS the task (has instructions)
+
+    Provide **question_url** if redirect detected.
+
+    ### 3. INSTRUCTION PARSING
+    Break into steps (ONLY if is_redirect=False).
+
+    **Actions:** scrape, extract, calculate, submit, download, transcribe, analyze, visit
+    **Each step:** step_number, action, description, target, dependencies
+
+    ### 4. ASSESSMENT
+    - **overall_goal**: One sentence
+    - **complexity**: trivial/simple/moderate/complex  
+    - **confidence**: 0.0-1.0
+
+    ---
+
+    ## EXAMPLE:
+
+    **Input:**
+    "Scrape /data?email=... Get the secret code. POST code to [/submit](https://example.com/submit)"
+
+    **Output:**
+    {{
+    "is_redirect": false,
+    "question_url": null,
+    "redirect_reasoning": "Contains task instructions",
+    "submission_url": "/submit",
+    "submission_url_is_relative": true,
+    "submission_reasoning": "Found 'POST code to /submit'",
+    "instructions": [
+    {{"step_number": 1, "action": "scrape", "description": "Scrape /data page", "target": "/data?email=...", "dependencies": []}},
+    {{"step_number": 2, "action": "extract", "description": "Extract secret code", "target": "secret code", "dependencies": }},
+    {{"step_number": 3, "action": "submit", "description": "POST code to /submit", "target": "/submit", "dependencies": }}
+    ],
+    "overall_goal": "Scrape, extract, and submit secret code",
+    "complexity": "simple",
+    "confidence": 0.92
+    }}
+
+    text
+
+    Now analyze the content above."""
+
     @staticmethod
     def analysis_planning_prompt(
         question: str,
@@ -543,3 +620,88 @@ Be detailed and actionable. Each step should be implementable."""
                     lines.append(f"  ... and {len(values) - 2} more")
         
         return "\n".join(lines)
+
+    @staticmethod
+    def url_detection_prompt(
+        content: str,
+        urls: list,
+        request_url: str
+    ) -> str:
+        """
+        Prompt for detecting Question URL from content
+        
+        Args:
+            content: Fetched content
+            urls: List of URLs found in content
+            request_url: Original request URL
+            
+        Returns:
+            Formatted prompt
+        """
+        urls_text = "\n".join(f"{i+1}. {url}" for i, url in enumerate(urls)) if urls else "None"
+        
+        return f"""You are analyzing content from a TDS quiz/task system to determine URL relationships.
+
+    **Context:**
+    - We fetched content from: {request_url}
+    - This content might either:
+    1. BE the actual task/question (return is_redirect=False)
+    2. REDIRECT/POINT to another URL where the actual task is located (return is_redirect=True)
+
+    **URLs found in content:**
+    {urls_text}
+
+    **Content (truncated to 1500 chars):**
+    {content[:1500]}
+
+    **Your Task:**
+    Analyze if this content IS the actual task, or if it REDIRECTS to another URL to get the task.
+
+    **URL Type Definitions:**
+    - **question_url**: URL to visit to GET the actual task/question
+    - **data_url**: URL to GET/SCRAPE data from (as part of task instructions)
+    - **submission_url**: URL to POST the final answer to
+    - **reference_url**: URL for reference/documentation only
+
+    **Decision Rules:**
+
+    1. **is_redirect=True** when:
+    - Content explicitly says "visit <url>", "your task is at <url>", "go to <url>"
+    - Content is very short (< 100 chars) with just a URL
+    - Content describes WHERE to find the task, not WHAT the task is
+    - Primary purpose is to direct you to another location
+
+    2. **is_redirect=False** when:
+    - Content contains actual task instructions (scrape, analyze, calculate, etc.)
+    - URLs are mentioned as DATA SOURCES or SUBMISSION endpoints
+    - Content is the task itself, even if it references other URLs
+
+    **Examples:**
+
+    Example 1 (REDIRECT):
+    Content: "Your quiz is available at https://example.com/quiz-834"
+    → is_redirect=True, question_url="https://example.com/quiz-834"
+    → Reasoning: Content tells you WHERE to go, not WHAT to do
+
+    Example 2 (ACTUAL TASK):
+    Content: "Scrape https://example.com/data and extract the top 5 prices. Submit to https://example.com/submit"
+    → is_redirect=False
+    → Reasoning: This IS the task. URLs are for data source and submission, not for getting the task
+
+    Example 3 (REDIRECT with multiple URLs):
+    Content: "Visit https://example.com/quiz-834 to receive your assignment. You'll be asked to scrape another website."
+    → is_redirect=True, question_url="https://example.com/quiz-834"
+    → Reasoning: Content directs you to quiz-834 to GET the actual task
+
+    Example 4 (ACTUAL TASK with multiple URLs):
+    Content: "Download data from https://api.example.com/data and compare with https://example.com/reference. Calculate the difference."
+    → is_redirect=False
+    → Reasoning: This IS the task. Both URLs are data sources for completing the task
+
+    Example 5 (SHORT REDIRECT):
+    Content: "https://example.com/quiz-834"
+    → is_redirect=True, question_url="https://example.com/quiz-834"
+    → Reasoning: Only a URL, no task instructions
+
+    **Now analyze the content above and provide your analysis.**"""
+   

@@ -1,6 +1,5 @@
 """
-Security Utilities
-Handles authentication and authorization
+Security and Authentication
 """
 
 from app.core.config import settings
@@ -9,49 +8,47 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def verify_secret(provided_secret: str) -> bool:
+class AuthenticationError(Exception):
+    """Raised when authentication fails"""
+    pass
+
+
+def verify_secret(secret: str) -> bool:
     """
-    Verify the provided secret against environment configuration
+    Verify if provided secret is valid
     
     Args:
-        provided_secret: Secret from request
+        secret: Secret from request
         
     Returns:
-        bool: True if secret matches, False otherwise
+        bool: True if valid, False otherwise
     """
-    if not settings.is_secret_configured():
-        logger.error("⚠️  API_SECRET not configured in environment")
-        return False
+    # Get expected secret from config/env
+    expected_secret = settings.API_SECRET
     
-    is_valid = provided_secret == settings.API_SECRET
+    # Simple comparison (use constant-time comparison in production)
+    is_valid = secret == expected_secret
     
-    if is_valid:
-        logger.info("✅ Secret verification successful")
-    else:
-        logger.warning("🚫 Secret verification failed")
-        logger.debug(
-            f"Expected length: {len(settings.API_SECRET)}, "
-            f"Got length: {len(provided_secret)}"
-        )
+    if not is_valid:
+        logger.warning(f"❌ Invalid secret attempt")
     
     return is_valid
 
 
-def mask_secret(secret: str, visible_chars: int = 4) -> str:
+def verify_authentication(secret: str) -> bool:
     """
-    Mask secret for logging purposes
+    Verify request authentication
     
     Args:
-        secret: Secret to mask
-        visible_chars: Number of characters to show at the end
+        secret: Secret from request
         
     Returns:
-        str: Masked secret
+        bool: True if authenticated
+        
+    Raises:
+        AuthenticationError: If authentication fails (HTTP 403)
     """
-    if not secret:
-        return ""
+    if not verify_secret(secret):
+        raise AuthenticationError("Invalid secret. Authentication failed.")
     
-    if len(secret) <= visible_chars:
-        return "*" * len(secret)
-    
-    return "*" * (len(secret) - visible_chars) + secret[-visible_chars:]
+    return True

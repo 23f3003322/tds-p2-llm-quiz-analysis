@@ -7,6 +7,47 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+class ImmediateResponse(BaseModel):
+    """
+    Immediate response sent after validation
+    HTTP 200 response before task processing
+    """
+    success: bool = Field(
+        description="Whether request was accepted"
+    )
+    
+    message: str = Field(
+        description="Status message"
+    )
+    
+    email: str = Field(
+        description="Student email from request"
+    )
+    
+    task_url: str = Field(
+        description="Task URL from request"
+    )
+    
+    status: str = Field(
+        description="Processing status: processing, completed, failed"
+    )
+    
+    timestamp: str = Field(
+        description="Response timestamp (ISO format)"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "message": "Task accepted and processing started",
+                "email": "student@ds.study.iitm.ac.in",
+                "task_url": "https://example.com/quiz-834",
+                "status": "processing",
+                "timestamp": "2025-11-29T12:00:00"
+            }
+        }
+
 
 class TaskResponse(BaseModel):
     """
