@@ -20,6 +20,7 @@ class ModuleType(str, Enum):
     ANALYZER = "analyzer"
     VISUALIZER = "visualizer"
     EXPORTER = "exporter"
+    DATA_SOURCE = "data_source"
     API_CLIENT = "api_client"
 
 

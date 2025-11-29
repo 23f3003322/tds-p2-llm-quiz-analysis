@@ -3,7 +3,7 @@ Module Capability Definitions
 Pre-defined capability sets for different module types
 """
 
-from app.modules.base import ModuleCapability
+from app.modules.base import ModuleCapability,ModuleType
 
 
 class ScrapingCapability:
@@ -43,6 +43,33 @@ class ScrapingCapability:
         estimated_speed="fast",
         memory_usage="low",
         requires_api_key=True
+    )
+
+class DataSourceCapability:
+    """Data source capabilities"""
+    
+    API = ModuleCapability(
+        module_type=ModuleType.DATA_SOURCE,
+        supported_input_formats={'url', 'endpoint'},
+        supported_output_formats={'json', 'xml', 'csv'},
+        can_handle_javascript=False,
+        requires_browser=False
+    )
+    
+    DATABASE = ModuleCapability(
+        module_type=ModuleType.DATA_SOURCE,
+        supported_input_formats={'connection_string', 'query'},
+        supported_output_formats={'json', 'csv'},
+        can_handle_javascript=False,
+        requires_browser=False
+    )
+    
+    FILE = ModuleCapability(
+        module_type=ModuleType.DATA_SOURCE,
+        supported_input_formats={'file_path', 'url'},
+        supported_output_formats={'json', 'csv'},
+        can_handle_javascript=False,
+        requires_browser=False
     )
 
 

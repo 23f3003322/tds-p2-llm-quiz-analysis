@@ -271,3 +271,24 @@ def register_mock_modules(registry: Optional['ModuleRegistry'] = None):
     logger.info("✅ Registered 6 mock modules for testing")
     
     return registry
+
+
+def register_real_modules(registry: Optional['ModuleRegistry'] = None):
+    """
+    Register real (non-mock) modules
+    
+    Args:
+        registry: Registry to register to (creates new if None)
+    """
+    from app.modules.registry import ModuleRegistry
+    from app.modules.scrapers import StaticScraper
+    
+    if registry is None:
+        registry = ModuleRegistry()
+    
+    # Register real modules
+    registry.register(StaticScraper())
+    
+    logger.info("✅ Registered 1 real module (StaticScraper)")
+    
+    return registry

@@ -20,11 +20,13 @@ from app.orchestrator.parameter_models import (
     FilterCondition,
     VisualizationRequirement
 )
-from app.orchestrator.orchestrator_engine import OrchestratorEngine
+# Remove direct import - causes circular dependency
+# from app.orchestrator.orchestrator_engine import OrchestratorEngine
 from app.orchestrator.execution_context import ExecutionContext 
 
+
 __all__ = [
-"TaskClassifier",
+    "TaskClassifier",
     "ActionExecutor",
     "ParameterExtractor",  
     "TaskClassification",
@@ -37,6 +39,15 @@ __all__ = [
     "DataSource",  
     "FilterCondition",  
     "VisualizationRequirement",  
-    "OrchestratorEngine",  
+    "OrchestratorEngine",  # Keep in __all__ for documentation
     "ExecutionContext", 
 ]
+
+
+# Lazy import to avoid circular dependency
+def __getattr__(name):
+    """Lazy import for OrchestratorEngine to break circular dependency"""
+    if name == "OrchestratorEngine":
+        from app.orchestrator.orchestrator_engine import OrchestratorEngine
+        return OrchestratorEngine
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

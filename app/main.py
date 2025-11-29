@@ -26,7 +26,14 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting LLM Analysis Quiz API")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info("=" * 80)
-    
+    import os
+    if os.getenv('ENVIRONMENT') == 'production':
+        from app.modules.scrapers.browser_pool import get_pooled_browser
+        from app.modules.scrapers.browser_config import PRODUCTION_CONFIG
+        
+        logger.info("Pre-warming browser pool...")
+        await get_pooled_browser(PRODUCTION_CONFIG)
+        logger.info("✓ Browser pool ready")
 
     yield
     
@@ -34,6 +41,10 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 80)
     logger.info("🛑 Shutting down - flushing logs")
     logger.info("=" * 80)
+
+    # Cleanup browser pool
+    from app.modules.scrapers.browser_pool import BrowserPool
+    await BrowserPool.cleanup()
     
 def create_application() -> FastAPI:
     """
