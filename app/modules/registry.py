@@ -14,7 +14,6 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-
 class ModuleRegistry:
     """
     Central registry for all processing modules
@@ -116,7 +115,6 @@ class ModuleRegistry:
         self.modules_by_type.clear()
         logger.info("Registry cleared")
 
-
 class ModuleSelector:
     """
     Selects appropriate modules based on task requirements
@@ -132,6 +130,31 @@ class ModuleSelector:
         """
         self.registry = registry or ModuleRegistry()
         logger.debug("ModuleSelector initialized")
+    
+    def select_by_capability(self, capability: str) -> Optional[BaseModule]:
+        """
+        Select FIRST module that supports a specific capability
+        Fast lookup for instruction-driven execution
+        """
+        logger.debug(f"🔍 Selecting module by capability: {capability}")
+        
+        for module in self.registry.get_all_modules():
+            capabilities = module.get_capabilities()
+            
+            # Check if capability is directly supported (boolean field)
+            if hasattr(capabilities, capability) and getattr(capabilities, capability):
+                logger.info(f"✓ Selected {module.name} for capability '{capability}'")
+                return module
+            
+            # Also check list-based capabilities if exist
+            if hasattr(capabilities, 'capabilities'):
+                caps_attr = getattr(capabilities, 'capabilities')
+                if isinstance(caps_attr, (list, set, tuple)) and capability in caps_attr:
+                    logger.info(f"✓ Selected {module.name} for capability '{capability}'")
+                    return module
+        
+        logger.warning(f"No module found for capability: {capability}")
+        return None
     
     def select_modules(
         self,
@@ -183,10 +206,10 @@ class ModuleSelector:
         return selected
     
     def _select_sourcing_module(
-    self,
-    classification: TaskClassification,
-    parameters: ExtractedParameters
-) -> Optional[BaseModule]:
+        self,
+        classification: TaskClassification,
+        parameters: ExtractedParameters
+    ) -> Optional[BaseModule]:
         """Select data sourcing module (scraper, API client, etc.)"""
         
         # No data sources, no module needed
@@ -375,12 +398,10 @@ class ModuleSelector:
         
         return True
 
-
 # Convenience function
 def get_module_registry() -> ModuleRegistry:
     """Get global module registry instance"""
     return ModuleRegistry()
-
 
 def get_module_selector() -> ModuleSelector:
     """Get module selector instance"""

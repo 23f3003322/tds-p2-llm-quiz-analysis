@@ -72,16 +72,7 @@ class DataSourceCapability:
         requires_browser=False
     )
 
-class VisualizationCapability:
-    """Visualization capabilities"""
-    
-    CHART = ModuleCapability(
-        module_type=ModuleType.VISUALIZER,
-        supported_input_formats={'json', 'csv'},
-        supported_output_formats={'png', 'svg', 'base64'},
-        can_handle_javascript=False,
-        requires_browser=False
-    )
+
 
 
 class ProcessingCapability:
@@ -110,6 +101,47 @@ class ProcessingCapability:
         memory_usage="medium"
     )
 
+class ExtractionCapability:
+    """Data extraction capabilities"""
+    DATA_EXTRACTOR = ModuleCapability(
+        can_extract_data=True,
+        supported_input_formats={'html', 'json', 'text', 'csv'},
+        supported_output_formats={'dict', 'json', 'text'},
+        estimated_speed="fast",
+        memory_usage="low"
+    )
+
+class CalculationCapability:
+    """Calculation capabilities"""
+    CALCULATOR = ModuleCapability(
+        can_calculate=True,
+        supported_input_formats={'expression', 'numbers', 'formula'},
+        supported_output_formats={'number', 'json'},
+        estimated_speed="fast",
+        memory_usage="low"
+    )
+
+class GenerationCapability:
+    """Answer generation capabilities"""
+    ANSWER_GENERATOR = ModuleCapability(
+        can_generate_answers=True,
+        can_generate_reports=True,
+        supported_input_formats={'data', 'analysis', 'scraped_content'},
+        supported_output_formats={'text', 'json', 'html'},
+        estimated_speed="medium",
+        memory_usage="medium"
+    )
+
+class AnalysisCapability:
+    """Data analysis capabilities"""
+    DATA_ANALYZER = ModuleCapability(
+        can_analyze_data=True,
+        can_run_statistics=True,
+        supported_input_formats={'csv', 'json', 'dataframe'},
+        supported_output_formats={'json', 'dict', 'text'},
+        estimated_speed="medium",
+        memory_usage="medium"
+    )
 
 class VisualizationCapability:
     """Capability definitions for visualization modules"""

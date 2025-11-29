@@ -46,7 +46,10 @@ class ModuleCapability(BaseModel):
     can_export_json: bool = False
     can_export_excel: bool = False
     can_export_pdf: bool = False
-    
+    can_extract_data: bool = False        # ← Data extraction
+    can_calculate: bool = False           # ← Calculations
+    can_analyze_data: bool = False        # ← Data analysis
+    can_generate_answers: bool = False    # ← Answer generation
     # What data formats can it handle?
     supported_input_formats: Set[str] = Field(default_factory=set)
     supported_output_formats: Set[str] = Field(default_factory=set)

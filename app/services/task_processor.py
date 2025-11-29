@@ -1,64 +1,49 @@
 """
 Task Processing Service
-Simplified with unified LLM analysis in task_fetcher
+Simplified with unified LLM analysis in task_fetcher + AnswerSubmitter integration
 """
 
 from typing import Dict, Any, Optional
+import asyncio
 from app.models.request import TaskRequest
 from app.core.logging import get_logger
 from app.core.exceptions import TaskProcessingError
 from app.orchestrator.orchestrator_engine import OrchestratorEngine
-from app.modules.registry import ModuleRegistry
-from app.modules.mock_modules import register_mock_modules
+from app.modules import get_fully_loaded_registry  # ✅ AUTO-REGISTRATION
 from app.services.task_fetcher import TaskFetcher
-# from app.orchestrator.answer_submitter import AnswerSubmitter  # ✅ Fixed: uncommented
+from app.modules.submitters.answer_submitter import AnswerSubmitter  # ✅ NEW
 
 logger = get_logger(__name__)
-
 
 class TaskProcessor:
     """
     Service class for processing TDS quiz tasks
-    Uses unified LLM analysis from task_fetcher
+    Uses unified LLM analysis from task_fetcher + AnswerSubmitter
     """
     
-    def __init__(
-        self,
-        enable_decomposition: bool = True,
-        enable_actions: bool = True,
-        auto_register_modules: bool = True
-    ):
-        """Initialize task processor"""
+    def __init__(self):
+        """Initialize task processor with auto-registration"""
         logger.info("🚀 Initializing TaskProcessor")
         
-        # Setup components
-        self.registry = ModuleRegistry()
-        # self.answer_submitter = AnswerSubmitter()  # ✅ Fixed: using this
-        
-        if auto_register_modules:
-            logger.info("📦 Registering modules...")
-            register_mock_modules(self.registry)
-            logger.info(f"✓ Registered {len(self.registry.get_all_modules())} modules")
+        # ✅ AUTO-REGISTER ALL MODULES
+        self.registry = get_fully_loaded_registry()
+        self.answer_submitter = AnswerSubmitter()
         
         # Initialize orchestrator engine
-        self.orchestrator = OrchestratorEngine(
-            module_registry=self.registry,
-            enable_decomposition=enable_decomposition,
-            enable_actions=enable_actions
-        )
+        self.orchestrator = OrchestratorEngine(self.registry)
         
-        logger.info("✅ TaskProcessor initialized")
+        logger.info(f"✅ TaskProcessor initialized with {len(self.registry.modules)} modules")
     
     async def process(self, task_data: TaskRequest) -> Dict[str, Any]:
         """
-        Process TDS quiz task
+        Process TDS quiz task - COMPLETE END-TO-END FLOW
         
         Flow:
-        1. Fetch and analyze Request URL (unified LLM call in task_fetcher)
-        2. If redirect, fetch Question URL (unified LLM call in task_fetcher)
-        3. Execute orchestration
-        4. Extract answer
-        5. Submit to TDS
+        1. Fetch and analyze Request URL 
+        2. Execute orchestration (scrape → extract → answer)
+        3. Extract answer
+        4. Submit to TDS ✅ NEW
+        5. Handle chained quizzes ✅ NEW
         6. Build response
         """
         logger.info("=" * 80)
@@ -72,59 +57,33 @@ class TaskProcessor:
         
         try:
             # ===================================================================
-            # STEP 1: FETCH AND ANALYZE REQUEST URL (UNIFIED LLM CALL)
+            # STEP 1: FETCH AND ANALYZE REQUEST URL
             # ===================================================================
             logger.info("\n" + "=" * 80)
             logger.info("STEP 1: FETCHING & ANALYZING REQUEST URL")
             logger.info("=" * 80)
             
+            # ✅ FIXED: Use proper async context manager pattern
             async with TaskFetcher() as fetcher:
                 analysis = await fetcher.fetch_and_analyze(url=request_url)
             
             logger.info(f"✓ Request URL analyzed")
-            logger.info(f"  Is Redirect: {analysis['is_redirect']}")
-            logger.info(f"  Complexity: {analysis['complexity']}")
-            
-            # ===================================================================
-            # STEP 2: IF REDIRECT, FETCH QUESTION URL (UNIFIED LLM CALL)
-            # ===================================================================
-            if analysis['is_redirect'] and analysis['question_url']:
-                logger.info("\n" + "=" * 80)
-                logger.info("STEP 2: FETCHING & ANALYZING QUESTION URL")
-                logger.info("=" * 80)
-                
-                question_url = analysis['question_url']
-                logger.info(f"🔗 Detected redirect to: {question_url}")
-                
-                async with TaskFetcher() as fetcher:
-                    analysis = await fetcher.fetch_and_analyze(
-                        url=question_url,
-                        base_url=request_url  # For resolving relative URLs
-                    )
-                
-                logger.info(f"✓ Question URL analyzed")
-                logger.info(f"  Task: {analysis['task_description'][:100]}...")
-            else:
-                question_url = request_url
-                logger.info(f"✓ Request URL contains actual task (no redirect)")
+            logger.info(f"  Submission URL: {analysis.get('submission_url')}")
             
             # Extract key information
             task_description = analysis['task_description']
             submission_url = analysis.get('submission_url') 
             instructions = analysis.get('instructions', [])
+            question_url = request_url  # Default to request URL
             
-            # Log URL hierarchy
-            logger.info("\n📍 URL Hierarchy:")
-            logger.info(f"   Request URL:    {request_url}")
-            logger.info(f"   Question URL:   {question_url}")
-            logger.info(f"   Submission URL: {submission_url}")
-            logger.info(f"   Instructions:   {len(instructions)} steps")
+            logger.info(f"📍 Submission URL: {submission_url}")
+            logger.info(f"📋 Instructions: {len(instructions)} steps")
             
             # ===================================================================
-            # STEP 3: EXECUTE ORCHESTRATION
+            # STEP 2: EXECUTE ORCHESTRATION (Scrape → Extract → Answer)
             # ===================================================================
             logger.info("\n" + "=" * 80)
-            logger.info("STEP 3: EXECUTING ORCHESTRATION")
+            logger.info("STEP 2: EXECUTING ORCHESTRATION")
             logger.info("=" * 80)
             
             orchestration_result = await self.orchestrator.execute_task(
@@ -135,249 +94,184 @@ class TaskProcessor:
                     'request_url': request_url,
                     'question_url': question_url,
                     'submission_url': submission_url,
-                    'instructions': instructions,
-                    'complexity': analysis['complexity'],
-                    'overall_goal': analysis['overall_goal']
+                    'instructions': instructions
                 }
             )
             
             logger.info(f"✓ Orchestration completed")
             logger.info(f"  Success: {orchestration_result['success']}")
-            logger.info(f"  Duration: {orchestration_result['duration']:.2f}s")
             
             # ===================================================================
-            # STEP 4: EXTRACT ANSWER
+            # STEP 3: EXTRACT ANSWER
+            # ===================================================================
+            answer = self._extract_answer(orchestration_result)
+            logger.info(f"✓ Answer extracted: {str(answer)[:100]}")
+
+            if not answer or answer == "No answer found":
+                logger.warning("⚠️ No valid answer extracted")
+                return self._build_response(
+                    task_data, request_url, question_url, submission_url, 
+                    analysis, orchestration_result, None, answer
+                )
+
+            # ===================================================================
+            # STEP 4: SUBMIT ANSWER & HANDLE CHAINING
             # ===================================================================
             logger.info("\n" + "=" * 80)
-            logger.info("STEP 4: EXTRACTING ANSWER")
+            logger.info("STEP 4: SUBMITTING & CHAINING")
             logger.info("=" * 80)
+
+            submission_result = await self.answer_submitter.execute({
+                'submission_url': submission_url,
+                'email': task_data.email,
+                'secret': str(answer),
+                'quiz_url': question_url,
+                'answer': answer
+            })
+
+            logger.info(f"✓ Submission completed: {getattr(submission_result, 'success', False)}")
+
+            # ✅ ALWAYS check for new URL first
+            if (hasattr(submission_result, 'data') and 
+                submission_result.data and 
+                (next_url := submission_result.data.get('next_quiz_url'))):
+                
+                logger.info(f"🔄 NEW QUIZ DETECTED: {next_url}")
+
+                # ✅ FIXED: Proper background task handling with reference tracking
+                background_tasks = set()
+                task = asyncio.create_task(self._process_chained_quiz(task_data.email, next_url, submission_url))
+                background_tasks.add(task)
+                task.add_done_callback(background_tasks.discard)
+
+                return {
+                    'success': True,
+                    'status': 'chained',
+                    'message': f'Submitted & chained to next quiz: {next_url}',
+                    'next_url': next_url,
+                    'correct': submission_result.data.get('correct', False)
+                }
+
+            # ✅ No new URL = SUCCESS (whether correct or not)
+            logger.info("✅ No new quiz - Task completed successfully")
+            return {
+                'success': True,
+                'status': 'completed',
+                'message': 'Answer submitted successfully to TDS',
+                'correct': getattr(submission_result, 'data', {}).get('correct', False)
+            }
             
-            answer = self._extract_answer(orchestration_result)
-            logger.info(f"✓ Answer extracted: {str(answer)[:200]}")
-            
-            # # ===================================================================
-            # # STEP 5: SUBMIT ANSWER TO TDS
-            # # ===================================================================
-            # logger.info("\n" + "=" * 80)
-            # logger.info("STEP 5: SUBMITTING ANSWER TO TDS")
-            # logger.info("=" * 80)
-            
-            # submission_result = await self.answer_submitter.submit_answer(
-            #     email=task_data.email,
-            #     secret=task_data.secret,
-            #     url=question_url,  # ✅ Use Question URL, not Request URL
-            #     answer=answer,
-            #     submission_url=submission_url
-            # )
-            
-            # logger.info(f"✓ Submission completed")
-            # logger.info(f"  Success: {submission_result['success']}")
-            # logger.info(f"  Status Code: {submission_result.get('status_code')}")
-            
-            # if submission_result.get('response'):
-            #     logger.info(f"  Response: {submission_result['response']}")
-            
-            # # ===================================================================
-            # # STEP 6: BUILD RESPONSE
-            # # ===================================================================
-            # result = self._build_response(
-            #     task_data=task_data,
-            #     request_url=request_url,
-            #     question_url=question_url,
-            #     submission_url=submission_url,
-            #     analysis=analysis,  # ✅ Fixed: pass analysis, not task_content
-            #     orchestration_result=orchestration_result,
-            #     submission_result=submission_result,
-            #     answer=answer
-            # )
-            
-            # logger.info("\n" + "=" * 80)
-            # logger.info(f"✅ TASK COMPLETED SUCCESSFULLY")
-            # logger.info(f"   Total Duration: {orchestration_result['duration']:.2f}s")
-            # logger.info(f"   Answer Submitted: {submission_result['success']}")
-            # logger.info("=" * 80)
-            
-            # return result  # ✅ Fixed: actually return the result
-            return
-        except TaskProcessingError:
-            # Re-raise task processing errors
-            raise
-        
         except Exception as e:
             logger.error(f"❌ Task processing failed: {str(e)}", exc_info=True)
             raise TaskProcessingError(f"Failed to process task: {str(e)}")
     
+    async def _process_chained_quiz(self, email: str, next_url: str, submission_url: str) -> Dict:
+        """Process chained quiz in background"""
+        try:
+            logger.info(f"🔄 Processing chained quiz: {next_url}")
+            
+            async with TaskFetcher() as fetcher:
+                analysis = await fetcher.fetch_and_analyze(url=next_url)
+            
+            orchestration_result = await self.orchestrator.execute_task(
+                task_input=analysis['task_description'],
+                task_url=next_url,
+                context={'email': email, 'submission_url': submission_url}
+            )
+            
+            answer = self._extract_answer(orchestration_result)
+            submission_result = await self.answer_submitter.execute({
+                'submission_url': submission_url,
+                'email': email,
+                'secret': str(answer),
+                'quiz_url': next_url,
+                'answer': answer
+            })
+            
+            logger.info(f"✅ Chained quiz {next_url} completed: {submission_result.success}")
+            return {
+                'next_url': next_url,
+                'success': getattr(submission_result, 'success', False),
+                'answer': answer,
+                'correct': getattr(submission_result, 'data', {}).get('correct')
+            }
+        except Exception as e:
+            logger.error(f"❌ Chained quiz failed: {next_url} - {e}", exc_info=True)
+            return {'next_url': next_url, 'success': False, 'error': str(e)}
+    
     def _extract_answer(self, orchestration_result: Dict[str, Any]) -> Any:
-        """
-        Extract final answer from orchestration result
-        
-        Tries multiple field names and strategies to find the answer
-        """
-        logger.debug("Extracting answer from orchestration result")
-        
+        """Extract final answer from orchestration result"""
         if not orchestration_result.get('success'):
-            logger.warning("Orchestration was not successful")
             return None
         
         data = orchestration_result.get('data', {})
-        
-        # If data is not a dict, return it directly
         if not isinstance(data, dict):
-            logger.debug(f"Data is {type(data).__name__}, returning as-is")
             return data
         
-        # Try common answer field names
-        result_fields = [
-            'answer', 'result', 'output', 'value', 'computed_value',
-            'extracted_data', 'scraped_data', 'secret_code',
-            'code', 'secret', 'solution', 'response'
-        ]
-        
-        for field in result_fields:
+        # Priority extraction fields
+        priority_fields = ['secret_code', 'answer', 'extracted', 'result', 'secret']
+        for field in priority_fields:
             if field in data:
-                logger.debug(f"Found answer in '{field}' field")
                 return data[field]
+            if f'{field}s' in data:
+                values = data.get(f'{field}s', {})
+                if values:
+                    return list(values.values())[-1]
         
-        # If only one key, return its value
-        if len(data) == 1:
-            key = list(data.keys())[0]
-            logger.debug(f"Single key '{key}' in data, using its value")
-            return data[key]
+        if data.get('extracted_values'):
+            extracted = data['extracted_values']
+            return list(extracted.values())[-1] if extracted else data
         
-        # Return entire data dict as last resort
-        logger.debug("No specific answer field found, returning entire data")
         return data
     
     def _build_response(
-        self,
-        task_data: TaskRequest,
-        request_url: str,
-        question_url: str,
-        submission_url: str,
-        analysis: Dict[str, Any],  # ✅ Fixed: renamed from task_content
-        orchestration_result: Dict[str, Any],
-        submission_result: Dict[str, Any],
+        self, 
+        task_data: TaskRequest, 
+        request_url: str, 
+        question_url: str, 
+        submission_url: str, 
+        analysis: Dict, 
+        orchestration_result: Dict, 
+        submission_result: Optional[Dict], 
         answer: Any
     ) -> Dict[str, Any]:
-        """
-        Build comprehensive API response
-        
-        Args:
-            task_data: Original task request
-            request_url: Original URL from API request
-            question_url: URL where actual task was found
-            submission_url: URL where answer was submitted
-            analysis: Unified analysis from task_fetcher
-            orchestration_result: Result from orchestrator
-            submission_result: Result from TDS submission
-            answer: Extracted answer
-            
-        Returns:
-            Formatted response dict
-        """
+        """Build comprehensive API response"""
         overall_success = (
-            orchestration_result['success'] and 
-            submission_result['success']
+            orchestration_result.get('success', False) and 
+            (submission_result.get('success', False) if submission_result else False)
         )
         
         return {
-            # Status
             'success': overall_success,
             'status': 'completed' if overall_success else 'failed',
-            
-            # Request info
             'email': task_data.email,
-            
-            # URL hierarchy
             'urls': {
                 'request_url': request_url,
                 'question_url': question_url,
                 'submission_url': submission_url
             },
-            
-            # IDs and timing
             'task_id': orchestration_result.get('task_id'),
             'execution_id': orchestration_result.get('execution_id'),
             'duration': orchestration_result.get('duration'),
-            'timestamp': orchestration_result.get('timestamp'),
-            
-            # Answer
             'answer': answer,
-            
-            # Submission details
-            'submission': {
-                'success': submission_result['success'],
-                'status_code': submission_result.get('status_code'),
-                'submitted_to': submission_url,
-                'submitted_url': question_url,  # URL included in payload
-                'response': submission_result.get('response')
-            },
-            
-            # Task details
-            'task_details': {
-                'task_description': analysis['task_description'][:500],  # Truncate
-                'complexity': analysis.get('complexity'),
-                'overall_goal': analysis.get('overall_goal'),
-                'instructions_count': len(analysis.get('instructions', [])),
-                'was_redirect': analysis.get('is_redirect', False)
-            },
-            
-            # Orchestration details
+            'submission': getattr(submission_result, 'data', None),
             'orchestration': {
-                'success': orchestration_result['success'],
-                'strategy': orchestration_result.get('strategy'),
-                'steps_completed': list(orchestration_result.get('steps', {}).keys())
+                'success': orchestration_result.get('success'),
+                'modules_used': orchestration_result.get('modules_used', []),
+                'strategy': orchestration_result.get('strategy')
             },
-            
-            # LLM analysis metadata
-            'llm_analysis': analysis.get('llm_analysis', {}),
-            
-            # Message
-            'message': self._build_message(overall_success, orchestration_result, submission_result)
+            'task_details': {
+                'description': analysis.get('task_description', '')[:200],
+                'instructions': len(analysis.get('instructions', []))
+            }
         }
-    
-    def _build_message(
-        self,
-        overall_success: bool,
-        orchestration_result: Dict[str, Any],
-        submission_result: Dict[str, Any]
-    ) -> str:
-        """Build human-readable status message"""
-        if overall_success:
-            return "Task completed successfully and answer submitted to TDS"
-        
-        if not orchestration_result['success']:
-            error = orchestration_result.get('error', 'Unknown error')
-            return f"Task execution failed: {error}"
-        
-        if not submission_result['success']:
-            error = submission_result.get('error', 'Unknown error')
-            return f"Task completed but submission failed: {error}"
-        
-        return "Task failed for unknown reason"
-    
-    # ========================================================================
-    # UTILITY METHODS
-    # ========================================================================
-    
-    def get_registry(self) -> ModuleRegistry:
-        """Get module registry for adding/removing modules"""
-        return self.registry
-    
-    def get_orchestrator(self) -> OrchestratorEngine:
-        """Get orchestrator engine for advanced usage"""
-        return self.orchestrator
-    
-    # def get_answer_submitter(self) -> AnswerSubmitter:
-    #     """Get answer submitter for testing"""
-    #     return self.answer_submitter
     
     async def cleanup(self):
         """Clean up resources"""
         try:
-            self.orchestrator.cleanup()
-            logger.info("✓ Orchestrator cleanup complete")
+            await self.orchestrator.cleanup()
+            await self.answer_submitter.cleanup()
+            logger.info("✅ TaskProcessor cleanup complete")
         except Exception as e:
-            logger.warning(f"Orchestrator cleanup error: {e}")
-        
-        logger.info("✅ TaskProcessor cleanup complete")
+            logger.error(f"Cleanup failed: {e}")
+

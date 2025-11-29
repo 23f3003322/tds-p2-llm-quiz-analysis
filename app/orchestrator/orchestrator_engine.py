@@ -1,70 +1,35 @@
 """
-Orchestrator Engine - Main Orchestration Logic
-The brain that coordinates all components
+Orchestrator Engine - Instruction-Driven Execution
+Uses parsed instructions from TaskFetcher, only required modules
 """
 
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, Optional, List
 import time
+import asyncio
+from urllib.parse import urljoin
 
 from app.orchestrator.execution_context import ExecutionContext
-from app.orchestrator.classifier import TaskClassifier
-from app.orchestrator.actions.action_executor import ActionExecutor
-from app.orchestrator.parameter_extractor import ParameterExtractor
+from app.orchestrator.models import UnifiedTaskAnalysis
 from app.modules.registry import ModuleRegistry, ModuleSelector
-from app.routing.simple_router import SimpleRouter
-from app.decomposition.task_decomposer import TaskDecomposer
 from app.services.task_fetcher import TaskFetcher
 from app.core.logging import get_logger
 from app.core.exceptions import TaskProcessingError
 
 logger = get_logger(__name__)
 
-
 class OrchestratorEngine:
     """
-    Main orchestrator engine
-    Coordinates all components to execute tasks end-to-end
+    Instruction-driven orchestrator
+    Executes ONLY the modules required by parsed instructions
     """
     
-    def __init__(
-        self,
-        module_registry: Optional[ModuleRegistry] = None,
-        enable_decomposition: bool = True,
-        enable_actions: bool = True
-    ):
-        """
-        Initialize orchestrator engine
-        
-        Args:
-            module_registry: Module registry (creates new if None)
-            enable_decomposition: Enable task decomposition for complex tasks
-            enable_actions: Enable action execution (downloads, transcription, etc.)
-        """
-        # Core components
+    def __init__(self, module_registry: Optional[ModuleRegistry] = None):
         self.task_fetcher = TaskFetcher()
-        self.classifier = TaskClassifier()
-        self.parameter_extractor = ParameterExtractor()
-        self.action_executor = ActionExecutor() if enable_actions else None
-        
-        # Module management
         self.registry = module_registry or ModuleRegistry()
         self.module_selector = ModuleSelector(self.registry)
-        
-        # Routing and decomposition
-        self.simple_router = SimpleRouter(
-            module_registry=self.registry,
-            module_selector=self.module_selector
-        )
-        self.task_decomposer = TaskDecomposer() if enable_decomposition else None
-        
-        # Configuration
-        self.enable_decomposition = enable_decomposition
-        self.enable_actions = enable_actions
-        
-        logger.info("🚀 OrchestratorEngine initialized")
-        logger.info(f"   Decomposition: {'enabled' if enable_decomposition else 'disabled'}")
-        logger.info(f"   Actions: {'enabled' if enable_actions else 'disabled'}")
-        logger.info(f"   Registered modules: {len(self.registry.get_all_modules())}")
+        logger.info(f"🚀 Instruction-driven Orchestrator initialized")
+        logger.info(f"   Modules available: {len(self.registry.get_all_modules())}")
     
     async def execute_task(
         self,
@@ -73,522 +38,320 @@ class OrchestratorEngine:
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Execute task end-to-end
-        Main entry point for task execution
-        
-        Args:
-            task_input: Task description or URL
-            task_url: Explicit task URL (if different from description)
-            context: Optional execution context
-            
-        Returns:
-            Dict: Execution result with all metadata
+        Execute task using parsed instructions (fast path) or full pipeline (fallback)
         """
-        # Create execution context
         exec_context = ExecutionContext(
             original_task=task_input,
             task_url=task_url,
             metadata=context or {}
         )
         
-        exec_context.log_event("Starting orchestration")
-        
         logger.info("=" * 80)
-        logger.info("🎯 ORCHESTRATOR ENGINE - Starting Task Execution")
-        logger.info(f"Task ID: {exec_context.task_id}")
-        logger.info(f"Execution ID: {exec_context.execution_id}")
+        logger.info("🎯 INSTRUCTION-DRIVEN ORCHESTRATOR")
+        logger.info(f"Task: {task_input[:100]}...")
         logger.info("=" * 80)
         
         try:
-            # STEP 1: Fetch task details
-            task_info = await self._step_1_fetch_task(task_input, exec_context)
+            # ✅ PRIORITY 1: Check if we have pre-parsed instructions from TaskFetcher
+            instructions = context.get('instructions', []) if context else []
+            submission_url = context.get('submission_url') if context else None
             
-            # STEP 2: Classify task
-            classification = await self._step_2_classify_task(task_info, exec_context)
+            if instructions:
+                logger.info(f"📋 Found {len(instructions)} pre-parsed instructions - FAST PATH")
+                result = await self._execute_from_instructions(
+                    instructions=instructions,
+                    task_description=task_input,
+                    submission_url=submission_url,
+                    task_url=task_url,
+                    exec_context=exec_context
+                )
+            else:
+                logger.info("🔍 No instructions found - FULL PIPELINE (legacy)")
+                result = await self._execute_full_pipeline(task_input, task_url, exec_context)
             
-            # STEP 3: Execute actions (if needed)
-            task_description = await self._step_3_execute_actions(
-                classification,
-                task_info,
-                exec_context
-            )
-            
-            # STEP 4: Extract parameters
-            parameters = await self._step_4_extract_parameters(
-                task_description,
-                classification,
-                exec_context
-            )
-            
-            # STEP 5: Decide execution strategy
-            execution_strategy = self._step_5_decide_strategy(
-                classification,
-                parameters,
-                exec_context
-            )
-            
-            # STEP 6: Execute based on strategy
-            result = await self._step_6_execute(
-                strategy=execution_strategy,
-                classification=classification,
-                parameters=parameters,
-                task_description=task_description,
-                exec_context=exec_context
-            )
-            
-            # Mark completion
             exec_context.mark_completed()
-            
-            # Build final result
             final_result = self._build_final_result(result, exec_context)
             
             logger.info("=" * 80)
-            logger.info(f"✅ ORCHESTRATION COMPLETE | Duration: {exec_context.get_duration():.2f}s")
-            logger.info("=" * 80)
-            
+            logger.info(f"✅ EXECUTION COMPLETE | {exec_context.get_duration():.2f}s")
             return final_result
             
         except Exception as e:
             exec_context.mark_failed(str(e))
             logger.error(f"❌ Orchestration failed: {str(e)}", exc_info=True)
-            
-            return {
-                'success': False,
-                'error': str(e),
-                'task_id': exec_context.task_id,
-                'execution_id': exec_context.execution_id,
-                'duration': exec_context.get_duration(),
-                'execution_log': exec_context.execution_log
-            }
+            return self._build_error_result(exec_context, str(e))
     
-    async def _step_1_fetch_task(
+    async def _execute_from_instructions(
         self,
-        task_input: str,
-        context: ExecutionContext
-    ) -> Dict[str, Any]:
-        """Step 1: Fetch task details"""
-        
-        logger.info("📥 Step 1: Fetching task details")
-        context.log_event("Step 1: Fetch task - started")
-        
-        start_time = time.time()
-        
-        # Check if it's a URL or direct description
-        if task_input.startswith(('http://', 'https://')):
-            logger.info(f"Fetching task from URL: {task_input}")
-            async with self.task_fetcher as fetcher:
-                task_info = await fetcher.fetch_task(task_input)
-        else:
-            logger.info("Using direct task description")
-            task_info = {
-                'task_description': task_input,
-                'source': 'direct_input',
-                'url': None
-            }
-        
-        duration = time.time() - start_time
-        context.set_step_result('task_fetch', task_info)
-        
-        logger.info(f"✓ Task fetched | Duration: {duration:.2f}s")
-        logger.debug(f"Task description length: {len(task_info['task_description'])} chars")
-        
-        return task_info
-    
-    async def _step_2_classify_task(
-        self,
-        task_info: Dict[str, Any],
-        context: ExecutionContext
-    ) -> Any:  # TaskClassification
-        """Step 2: Classify task"""
-        
-        logger.info("🔍 Step 2: Classifying task")
-        context.log_event("Step 2: Classify task - started")
-        
-        start_time = time.time()
-        
-        classification = await self.classifier.classify_task(
-            task_description=task_info['task_description']
-        )
-        
-        duration = time.time() - start_time
-        context.set_step_result('classification', classification)
-        
-        logger.info(f"✓ Task classified | Duration: {duration:.2f}s")
-        logger.info(f"  Type: {classification.primary_task.value}")
-        logger.info(f"  Complexity: {classification.complexity.value}")
-        logger.info(f"  Confidence: {classification.confidence:.2f}")
-        
-        return classification
-    
-    async def _step_3_execute_actions(
-    self,
-    classification: Any,
-    task_info: Dict[str, Any],
-    context: ExecutionContext
-) -> str:
-        """Step 3: Execute actions (downloads, transcription, etc.)"""
-        
-        if not self.enable_actions:
-            logger.info("⏭️  Step 3: Actions disabled, skipping")
-            return task_info['task_description']
-        
-        logger.info("⚙️  Step 3: Executing actions")
-        context.log_event("Step 3: Execute actions - started")
-        
-        start_time = time.time()
-        
-        # Check if actions are needed based on classification
-        # Actions are needed if:
-        # 1. Task requires external data
-        # 2. Task has embedded content (URLs, files, media)
-        # 3. Task is not direct/simple
-        
-        needs_actions = (
-            classification.requires_external_data or
-            classification.complexity.value != 'simple' or
-            any(keyword in task_info['task_description'].lower() 
-                for keyword in ['http://', 'https://', 'download', 'scrape', 'fetch', 
-                            'transcribe', '.pdf', '.csv', '.mp4', '.mp3'])
-        )
-        
-        if needs_actions:
-            logger.info("Actions may be required, performing content analysis...")
-            
-            # Perform content analysis
-            from app.orchestrator.models import ContentAnalysis
-            
-            # Simple content analysis based on task description
-            content_analysis = self._analyze_content(
-                task_info['task_description'],
-                classification
-            )
-            
-            if not content_analysis.is_direct_task:
-                logger.info("Executing actions...")
-                
-                final_description = await self.action_executor.execute_actions(
-                    content_analysis=content_analysis,
-                    original_task_description=task_info['task_description']
-                )
-                
-                duration = time.time() - start_time
-                context.set_step_result('actions', {
-                    'executed': True,
-                    'final_description': final_description,
-                    'content_analysis': content_analysis.dict()
-                })
-                
-                logger.info(f"✓ Actions executed | Duration: {duration:.2f}s")
-                return final_description
-        
-        logger.info("No actions required")
-        context.set_step_result('actions', {'executed': False})
-        return task_info['task_description']
-
-    def _analyze_content(
-        self,
+        instructions: List[Dict[str, Any]],
         task_description: str,
-        classification: Any
-    ) -> Any:  # ContentAnalysis
-        """
-        Analyze content to determine if actions are needed
-        
-        Args:
-            task_description: Task description
-            classification: Task classification
-            
-        Returns:
-            ContentAnalysis: Content analysis result
-        """
-        from app.orchestrator.models import ContentAnalysis
-        import re
-        
-        # Extract URLs
-        url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
-        urls = re.findall(url_pattern, task_description)
-        
-        # Check for file references
-        file_extensions = ['.pdf', '.csv', '.xlsx', '.json', '.xml', '.txt', 
-                        '.mp4', '.mp3', '.wav', '.jpg', '.png']
-        has_files = any(ext in task_description.lower() for ext in file_extensions)
-        
-        # Check for media
-        media_keywords = ['video', 'audio', 'transcribe', 'image', 'screenshot']
-        has_media = any(keyword in task_description.lower() for keyword in media_keywords)
-        
-        # Check for downloads
-        download_keywords = ['download', 'fetch', 'get', 'retrieve']
-        needs_download = has_files or any(
-            kw in task_description.lower() for kw in download_keywords
-        )
-        
-        # Determine if it's a direct task
-        is_direct = not (urls or has_files or has_media or needs_download)
-        
-        # Determine content type
-        if has_media and any(kw in task_description.lower() for kw in ['video', '.mp4']):
-            content_type = 'video'
-        elif has_media and any(kw in task_description.lower() for kw in ['audio', '.mp3', '.wav']):
-            content_type = 'audio'
-        elif any(kw in task_description.lower() for kw in ['image', '.jpg', '.png']):
-            content_type = 'image'
-        elif has_files:
-            content_type = 'file'
-        elif urls:
-            content_type = 'html'
-        else:
-            content_type = 'text'
-        
-        # Build content analysis
-        content_analysis = ContentAnalysis(
-            content_type=content_type,
-            is_direct_task=is_direct,
-            requires_download=needs_download and has_files,
-            requires_transcription=has_media and any(
-                kw in task_description.lower() for kw in ['transcribe', 'audio', 'video']
-            ),
-            requires_ocr='ocr' in task_description.lower() or 
-                        'extract text' in task_description.lower(),
-            requires_navigation=bool(urls) and not has_files and not has_media,
-            action_urls=urls if urls else [],
-            task_description=task_description[:500],  # First 500 chars
-            confidence=0.8,
-            reasoning="Content analysis based on URL and keyword detection"
-        )
-        
-        logger.debug(
-            f"Content analysis: type={content_type}, is_direct={is_direct}, "
-            f"urls={len(urls)}, needs_download={needs_download}"
-        )
-        
-        return content_analysis
-
-
-    async def _step_4_extract_parameters(
-        self,
-        task_description: str,
-        classification: Any,
-        context: ExecutionContext
-    ) -> Any:  # ExtractedParameters
-        """Step 4: Extract parameters"""
-        
-        logger.info("🔧 Step 4: Extracting parameters")
-        context.log_event("Step 4: Extract parameters - started")
-        
-        start_time = time.time()
-        
-        result = await self.parameter_extractor.extract_parameters(
-            task_description=task_description,
-            context={'classification': classification.dict()}
-        )
-        
-        duration = time.time() - start_time
-        context.set_step_result('parameters', result.parameters)
-        
-        logger.info(f"✓ Parameters extracted | Duration: {duration:.2f}s")
-        logger.info(f"  Data sources: {len(result.parameters.data_sources)}")
-        logger.info(f"  Filters: {len(result.parameters.filters)}")
-        logger.info(f"  Confidence: {result.parameters.confidence:.2f}")
-        
-        return result.parameters
-    
-    def _step_5_decide_strategy(
-        self,
-        classification: Any,
-        parameters: Any,
-        context: ExecutionContext
-    ) -> str:
-        """Step 5: Decide execution strategy"""
-        
-        logger.info("🎯 Step 5: Deciding execution strategy")
-        context.log_event("Step 5: Decide strategy - started")
-        
-        # Check if decomposition is needed
-        if self.enable_decomposition and self.task_decomposer:
-            needs_decomposition = self.task_decomposer._needs_decomposition(
-                classification,
-                parameters
-            )
-            
-            if needs_decomposition:
-                logger.info("✓ Strategy: DECOMPOSE (complex task)")
-                context.set_step_result('strategy', 'decompose')
-                return 'decompose'
-        
-        logger.info("✓ Strategy: SIMPLE_ROUTE (simple task)")
-        context.set_step_result('strategy', 'simple_route')
-        return 'simple_route'
-    
-    async def _step_6_execute(
-        self,
-        strategy: str,
-        classification: Any,
-        parameters: Any,
-        task_description: str,
+        submission_url: Optional[str],
+        task_url: Optional[str],
         exec_context: ExecutionContext
     ) -> Dict[str, Any]:
-        """Step 6: Execute based on strategy"""
+        """Execute ONLY required modules based on instructions"""
+        logger.info("🚀 FAST PATH: Instruction-driven execution")
+        exec_context.log_event("Instruction execution started")
         
-        logger.info(f"🚀 Step 6: Executing with strategy: {strategy}")
-        exec_context.log_event(f"Step 6: Execute ({strategy}) - started")
-        
-        start_time = time.time()
-        
-        if strategy == 'decompose':
-            result = await self._execute_with_decomposition(
-                classification,
-                parameters,
-                task_description,
-                exec_context
-            )
-        else:
-            result = await self._execute_simple_route(
-                classification,
-                parameters,
-                task_description,
-                exec_context
-            )
-        
-        duration = time.time() - start_time
-        exec_context.set_step_result('execution', result)
-        
-        logger.info(f"✓ Execution complete | Duration: {duration:.2f}s")
-        
-        return result
-    
-    async def _execute_simple_route(
-        self,
-        classification: Any,
-        parameters: Any,
-        task_description: str,
-        context: ExecutionContext
-    ) -> Dict[str, Any]:
-        """Execute using simple router"""
-        
-        logger.info("Executing via SimpleRouter")
-        
-        result = await self.simple_router.route_and_execute(
-            classification=classification,
-            parameters=parameters,
-            task_description=task_description
-        )
-        
-        return {
-            'strategy': 'simple_route',
-            'success': result.success,
-            'data': result.data,
-            'steps_completed': result.steps_completed,
-            'total_steps': result.total_steps,
-            'step_results': result.step_results,
-            'errors': result.errors
+        # Execution state
+        state = {
+            'scraped_data': {},
+            'extracted_values': {},
+            'processed_data': None,
+            'visualizations': [],
+            'final_answer': None
         }
-    
-    async def _execute_with_decomposition(
-        self,
-        classification: Any,
-        parameters: Any,
-        task_description: str,
-        context: ExecutionContext
-    ) -> Dict[str, Any]:
-        """Execute complex task with decomposition"""
         
-        logger.info("Executing via TaskDecomposer + SimpleRouter")
-        
-        # Decompose task
-        logger.info("Decomposing task into subtasks...")
-        decomposition = self.task_decomposer.decompose(
-            classification=classification,
-            parameters=parameters,
-            task_description=task_description
-        )
-        
-        logger.info(f"Task decomposed into {len(decomposition.subtasks)} subtasks")
-        
-        # Execute each subtask
-        subtask_results = []
-        
-        for i, subtask in enumerate(decomposition.subtasks, 1):
-            logger.info(f"Executing subtask {i}/{len(decomposition.subtasks)}: {subtask.name}")
+        for step in instructions:
+            step_num = step.get('step', 0)
+            action = step.get('action')
+            target = step.get('target')
+            description = step.get('text', '')
             
-            # Check if subtask can execute (dependencies met)
-            ready_subtasks = decomposition.get_ready_subtasks()
-            if subtask not in ready_subtasks:
-                logger.warning(f"Subtask {subtask.id} dependencies not met, skipping")
-                continue
-            
-            # Execute subtask using simple router
-            subtask.status = "running"
+            logger.info(f"📍 Step {step_num}: {action} ({target or description[:50]}...)")
+            exec_context.log_event(f"Step {step_num}: {action}")
             
             try:
-                result = await self.simple_router.route_and_execute(
-                    classification=subtask.classification,
-                    parameters=subtask.parameters,
-                    task_description=subtask.description
-                )
-                
-                subtask.status = "completed"
-                subtask.result = result.data
-                
-                subtask_results.append({
-                    'subtask_id': subtask.id,
-                    'name': subtask.name,
-                    'success': result.success,
-                    'data': result.data
-                })
-                
-                logger.info(f"✓ Subtask {i} completed")
-                
+                if action == 'scrape':
+                    result = await self._execute_scrape(target, task_url, exec_context)
+                    state['scraped_data'][target or f'step_{step_num}'] = result
+                    
+                elif action == 'extract':
+                    value = await self._execute_extract(state, step, exec_context)
+                    state['extracted_values'][step_num] = value
+                    
+                elif action == 'calculate':
+                    value = await self._execute_calculate(description, exec_context)
+                    state['final_answer'] = value
+                    
+                elif action == 'analyze':
+                    state['processed_data'] = await self._execute_analysis(state, step, exec_context)
+                    
+                elif action == 'visualize':
+                    viz = await self._execute_visualize(state, step, exec_context)
+                    state['visualizations'].append(viz)
+                    
+                elif action == 'generate':
+                    state['final_answer'] = await self._execute_generate(state, step, exec_context)
+                    
+                elif action == 'submit':
+                    # Select a module capable of submitting/exporting results
+                    submitter = self.module_selector.select_by_capability('can_export_json')
+                    if submitter:
+                        payload = {
+                            'submission_url': submission_url,
+                            'email': exec_context.metadata.get('email'),
+                            'secret': state.get('final_answer'),
+                            'quiz_url': task_url,
+                            'answer': state.get('final_answer')
+                        }
+                        result = await submitter.execute(payload)
+                        logger.info(f"📤 Submission result: {getattr(result, 'success', False)}, data: {getattr(result, 'data', None)}")
+                        state['submission_result'] = getattr(result, 'data', None)
+                    else:
+                        logger.warning("No submitter module available for 'submit' action")
+                else:
+                    logger.debug(f"Unknown action '{action}' - skipping")
+            
             except Exception as e:
-                subtask.status = "failed"
-                subtask.error = str(e)
-                logger.error(f"✗ Subtask {i} failed: {e}")
+                logger.error(f"✗ Step {step_num} failed: {e}", exc_info=True)
+                exec_context.log_event(f"Step {step_num} failed: {str(e)}")
+                # Continue to next step without aborting entire instruction set
+                continue
         
-        # Combine results
-        final_data = subtask_results[-1]['data'] if subtask_results else None
+        # Ensure final answer exists
+        if state.get('final_answer') is None:
+            state['final_answer'] = self._get_best_answer(state)
+        
+        modules_used = self._get_modules_used(exec_context)
         
         return {
-            'strategy': 'decompose',
-            'success': all(r['success'] for r in subtask_results),
-            'data': final_data,
-            'subtasks_completed': len(subtask_results),
-            'total_subtasks': len(decomposition.subtasks),
-            'subtask_results': subtask_results,
-            'decomposition': {
-                'execution_strategy': decomposition.execution_strategy,
-                'complexity_score': decomposition.complexity_score,
-                'can_parallelize': decomposition.can_parallelize
-            }
+            'strategy': 'instructions',
+            'success': state['final_answer'] is not None,
+            'modules_used': modules_used,
+            'data': state,
+            'submission_url': submission_url,
+            'steps_executed': len(instructions)
         }
     
-    def _build_final_result(
+    async def _execute_full_pipeline(
         self,
-        execution_result: Dict[str, Any],
-        context: ExecutionContext
+        task_input: str,
+        task_url: Optional[str],
+        exec_context: ExecutionContext
     ) -> Dict[str, Any]:
-        """Build final result dictionary"""
+        """Fallback: Legacy full pipeline (for backward compatibility)"""
+        logger.warning("⚠️  Using legacy full pipeline")
+        return {
+            'strategy': 'legacy',
+            'success': False,
+            'data': {'error': 'Legacy pipeline not implemented for instructions'},
+            'modules_used': []
+        }
+    
+    # =========================================================================
+    # MODULE EXECUTION HELPERS (✅ FIXED CAPABILITY NAMES)
+    # =========================================================================
+    
+    async def _execute_scrape(self, target_url: str, base_url: str, exec_context: ExecutionContext) -> Dict:
+        """Execute scraping with appropriate scraper"""
+        url = urljoin(base_url or '', target_url)
+        logger.info(f"🌐 Scraping: {url}")
         
+        # ✅ FIXED: Try static first
+        static_module = self.module_selector.select_by_capability('can_scrape_static')
+        if static_module:
+            result = await static_module.execute({'url': url})
+            if result.success and result.data:
+                logger.info(f"✓ Static scrape succeeded ({len(result.data) if isinstance(result.data, (list, dict)) else 'content'})")
+                return result.data
+        
+        # ✅ FIXED: Fallback to dynamic
+        dynamic_module = self.module_selector.select_by_capability('can_scrape_dynamic')
+        if dynamic_module:
+            result = await dynamic_module.execute({'url': url})
+            logger.info(f"✓ Dynamic scrape: {result.success}")
+            return result.data if result.success else {}
+        
+        raise TaskProcessingError(f"Could not scrape {url}")
+    
+    async def _execute_extract(self, state: Dict, step: Dict, exec_context: ExecutionContext) -> Any:
+        """Extract specific data from scraped content"""
+        logger.info("🔍 Extracting data")
+        
+        scraped = list(state['scraped_data'].values())
+        if not scraped:
+            raise TaskProcessingError("No scraped data for extraction")
+        
+        # ✅ FIXED: Look for extraction modules
+        extractor = self.module_selector.select_by_capability('can_extract_data')
+        if extractor:
+            latest_scrape = scraped[-1]
+            result = await extractor.execute({
+                'data': latest_scrape,
+                'target': step.get('target', 'secret code')
+            })
+            return result.data if result.success else None
+        
+        # Fallback: simple text search
+        target = step.get('target', '').lower()
+        for scrape_data in scraped:
+            if isinstance(scrape_data, dict):
+                for key, value in scrape_data.items():
+                    if target in str(value).lower():
+                        logger.info(f"✓ Extracted: {value}")
+                        return value
+        raise TaskProcessingError("Extraction failed")
+    
+    async def _execute_calculate(self, description: str, exec_context: ExecutionContext) -> Any:
+        """Execute calculation"""
+        logger.info(f"🧮 Calculating: {description}")
+        
+        # ✅ FIXED
+        calc_module = self.module_selector.select_by_capability('can_calculate')
+        if calc_module:
+            result = await calc_module.execute({'expression': description})
+            return result.data if result.success else None
+        
+        # Simple eval fallback (secure context only)
+        try:
+            safe_desc = re.sub(r'[^\d+\-*/().\s]', '', description)
+            result = eval(safe_desc)
+            return result
+        except:
+            raise TaskProcessingError(f"Calculation failed: {description}")
+    
+    async def _execute_analysis(self, state: Dict, step: Dict, exec_context: ExecutionContext) -> Dict:
+        """Execute data analysis ONLY when instructed"""
+        logger.info("📊 Analyzing data")
+        
+        # ✅ FIXED
+        analyzer = self.module_selector.select_by_capability('can_analyze_data')
+        if analyzer:
+            result = await analyzer.execute({'data': state['scraped_data']})
+            return result.data if result.success else {}
+        return {}
+    
+    async def _execute_visualize(self, state: Dict, step: Dict, exec_context: ExecutionContext) -> Dict:
+        """Execute visualization ONLY when instructed"""
+        logger.info("📈 Creating visualization")
+        
+        # ✅ FIXED
+        visualizer = self.module_selector.select_by_capability('can_create_charts')
+        if visualizer:
+            result = await visualizer.execute({'data': state['scraped_data']})
+            return result.data if result.success else {}
+        return {}
+    
+    async def _execute_generate(self, state: Dict, step: Dict, exec_context: ExecutionContext) -> Any:
+        """Generate final answer ONLY when instructed"""
+        logger.info("✍️ Generating final answer")
+        
+        # ✅ FIXED
+        generator = self.module_selector.select_by_capability('can_generate_answers')
+        if generator:
+            result = await generator.execute(state)
+            return result.data if result.success else None
+        return self._get_best_answer(state)
+    
+    # =========================================================================
+    # UTILITIES
+    # =========================================================================
+    
+    def _get_best_answer(self, state: Dict) -> Any:
+        """Get the best available answer from state"""
+        if state.get('final_answer'):
+            return state['final_answer']
+        if state.get('extracted_values'):
+            return list(state['extracted_values'].values())[-1]
+        if state.get('processed_data'):
+            return state['processed_data']
+        return "No answer found"
+    
+    def _get_modules_used(self, exec_context: ExecutionContext) -> List[str]:
+        """Get list of modules actually used - ROBUST VERSION"""
+        modules = set()
+        
+        if not exec_context.execution_log:
+            return []
+        
+        for event in exec_context.execution_log:
+            if isinstance(event, dict):
+                details = event.get('details', {})
+                if isinstance(details, dict) and 'module' in details:
+                    modules.add(details['module'])
+            elif isinstance(event, str):
+                continue
+        
+        return list(modules)
+    
+    def _build_final_result(self, execution_result: Dict, context: ExecutionContext) -> Dict:
+        """Build standardized result"""
         return {
             'success': execution_result.get('success', False),
             'task_id': context.task_id,
             'execution_id': context.execution_id,
-            'data': execution_result.get('data'),
+            'answer': execution_result['data'].get('final_answer'),
+            'modules_used': execution_result.get('modules_used', []),
             'strategy': execution_result.get('strategy'),
             'duration': context.get_duration(),
-            'steps': {
-                'task_fetch': context.get_step_result('task_fetch') is not None,
-                'classification': context.get_step_result('classification') is not None,
-                'actions': context.get_step_result('actions') is not None,
-                'parameters': context.get_step_result('parameters') is not None,
-                'execution': context.get_step_result('execution') is not None
-            },
-            'execution_details': execution_result,
-            'execution_log': context.execution_log,
-            'metadata': context.metadata
+            'submission_url': execution_result.get('submission_url'),
+            'data': execution_result['data'],
+            'execution_log': context.execution_log
         }
     
-    def cleanup(self):
-        """Clean up resources"""
-        if self.action_executor:
-            self.action_executor.cleanup()
-        self.simple_router.cleanup()
-        logger.info("OrchestratorEngine cleanup complete")
+    def _build_error_result(self, context: ExecutionContext, error: str) -> Dict:
+        """Build error result"""
+        return {
+            'success': False,
+            'task_id': context.task_id,
+            'execution_id': context.execution_id,
+            'error': error,
+            'duration': context.get_duration(),
+            'execution_log': context.execution_log
+        }
+    
+    async def cleanup(self):
+        """Cleanup resources"""
+        await self.task_fetcher.__aexit__(None, None, None)
+        logger.info("Orchestrator cleanup complete")

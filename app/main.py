@@ -13,6 +13,8 @@ from app.core.exceptions import register_exception_handlers
 from app.middleware.logging import LoggingMiddleware
 from app.api.routes import task, health
 from app.core.logging import setup_logging, get_logger
+from app.modules import register_all_modules
+from app.orchestrator.orchestrator_engine import OrchestratorEngine
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -73,6 +75,8 @@ def create_application() -> FastAPI:
     
     # Register exception handlers
     register_exception_handlers(app)
+    registry = register_all_modules()
+    orchestrator = OrchestratorEngine(registry)
     
     # Include routers
     app.include_router(health.router, tags=["Health"])
