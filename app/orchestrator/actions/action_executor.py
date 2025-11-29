@@ -12,6 +12,15 @@ from app.orchestrator.actions import FileDownloader, MediaTranscriber, ImageProc
 from app.services.task_fetcher import TaskFetcher
 from app.core.logging import get_logger
 from app.core.exceptions import TaskProcessingError
+from app.modules.scrapers.static_scraper import StaticScraper
+from app.modules.scrapers.dynamic_scraper import DynamicScraper
+from app.modules.clients.rest_client import RESTClient
+from app.modules.processors.data_cleaner import DataCleaner
+from app.modules.processors.data_transformer import DataTransformer
+from app.modules.analyzers.data_analyzer import DataAnalyzer
+from app.modules.visualizers.chart_generator import ChartGenerator
+from app.modules.generators.report_generator import ReportGenerator
+
 
 logger = get_logger(__name__)
 

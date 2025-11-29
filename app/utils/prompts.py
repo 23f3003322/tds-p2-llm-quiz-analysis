@@ -52,6 +52,293 @@ Extract:
 Be precise and thorough. If something is ambiguous, make reasonable assumptions based on context.
 Extract EVERYTHING that could be useful for task execution."""
 
+class AnalysisPrompts:
+    """Prompts for data analysis and insight generation"""
+    
+    @staticmethod
+    def analysis_planning_prompt(
+        question: str,
+        schema_text: str,
+        summary: Dict[str, Any],
+        context_text: str = ""
+    ) -> str:
+        """
+        Prompt for LLM to plan analysis strategy
+        
+        Args:
+            question: User's analytical question
+            schema_text: Formatted data schema
+            summary: Data summary statistics
+            context_text: Optional context (domain, goal)
+            
+        Returns:
+            Prompt string
+        """
+        return f"""You are an expert data analyst. A user has a question about their data, and you need to determine what statistical analysis will best answer it.
+
+User Question: "{question}"{context_text}
+
+Available Data:
+- Total Rows: {summary['row_count']}
+- Columns: {summary['column_count']}
+
+Column Schema:
+{schema_text}
+
+Numeric Columns: {', '.join(summary['numeric_columns']) if summary['numeric_columns'] else 'None'}
+Text/Categorical Columns: {', '.join(summary['text_columns']) if summary['text_columns'] else 'None'}
+Has Temporal Data: {summary['has_temporal_data']}
+
+Based on this question and data, create a comprehensive analysis plan.
+
+Available Analysis Types:
+1. **descriptive**: Calculate mean, median, std, min, max for numeric columns
+2. **correlation**: Find relationships between numeric variables
+3. **trend**: Detect patterns over time (if temporal data exists)
+4. **segmentation**: Compare groups using categorical columns
+5. **distribution**: Analyze data spread, skewness, outliers
+6. **ranking**: Identify top/bottom performers
+7. **comparison**: Compare specific groups or time periods
+
+Create a JSON analysis plan:
+
+{{
+  "analysis_types": ["descriptive", "correlation", ...],
+  "primary_focus": "What aspect to focus on",
+  "columns_to_analyze": ["col1", "col2", ...],
+  "correlations": [
+    ["col1", "col2"],
+    ["col3", "col4"]
+  ],
+  "segment_by": "category_column_name" or null,
+  "segment_metric": "metric_to_compare" or null,
+  "trend_column": "temporal_column" or null,
+  "value_column": "what_to_track_over_time" or null,
+  "detect_outliers": true or false,
+  "outlier_columns": ["col1", "col2"],
+  "ranking": {{
+    "column": "column_to_rank",
+    "by": "metric_to_rank_by",
+    "top_n": 5,
+    "ascending": false
+  }} or null,
+  "filters": {{
+    "column": "value"
+  }} or null,
+  "comparisons": [
+    {{"type": "group", "column": "category", "values": ["A", "B"]}}
+  ] or [],
+  "reasoning": "Explain why this analysis answers the user's question",
+  "expected_insights": ["What insights might we find", "What patterns to look for"]
+}}
+
+Important:
+- Choose analyses that DIRECTLY answer the user's question
+- Use actual column names from the schema
+- Be specific about what to compare, correlate, or segment
+- If question asks "why", include correlation and segmentation
+- If question asks "what", include ranking and descriptive stats
+- If question asks "when" or "trend", include temporal analysis
+
+Return ONLY valid JSON, no additional text.
+"""
+    @staticmethod
+    def question_specific_insights_prompt(
+        question: str,
+        stats_summary: str,
+        plan: Dict[str, Any],
+        domain: str = "general"
+    ) -> str:
+        """
+        Prompt for generating question-specific insights
+        
+        Args:
+            question: User's original question
+            stats_summary: Formatted statistical results
+            plan: Analysis plan that was executed
+            domain: Domain context
+            
+        Returns:
+            Prompt string
+        """
+        return f"""You are a data analyst expert. A user asked a specific question about their data, 
+and statistical analysis has been performed. Interpret the results to directly answer their question.
+
+User's Original Question: "{question}"
+
+Domain: {domain}
+
+Analysis Performed:
+- Focus: {plan.get('primary_focus', 'Comprehensive analysis')}
+- Methods: {', '.join(plan.get('analysis_types', []))}
+
+Statistical Results:
+{stats_summary}
+
+Your task: Provide a clear, actionable answer to the user's question based on these statistics.
+
+Generate a JSON response with:
+
+{{
+  "direct_answer": "One clear sentence directly answering the question",
+  "key_findings": [
+    "Finding 1 with specific numbers",
+    "Finding 2 with specific numbers",
+    "Finding 3 with specific numbers"
+  ],
+  "supporting_evidence": [
+    "Statistical evidence 1",
+    "Statistical evidence 2"
+  ],
+  "recommendations": [
+    "Specific action 1 based on findings",
+    "Specific action 2 based on findings",
+    "Specific action 3 based on findings"
+  ],
+  "caveats": [
+    "Limitation or assumption to note",
+    "What to validate or investigate further"
+  ],
+  "confidence_level": "high/medium/low",
+  "confidence_reasoning": "Why you have this confidence level"
+}}
+
+Rules:
+- ALWAYS reference actual numbers from the statistics
+- Be specific, not generic
+- Connect findings directly to the original question
+- Prioritize actionable insights
+- If data doesn't fully answer the question, say so
+
+Return ONLY valid JSON.
+"""
+    
+    @staticmethod
+    def general_insights_prompt(
+        stats_summary: str,
+        domain: str = "general",
+        goal: str = "understand the data"
+    ) -> str:
+        """
+        Prompt for generating general insights
+        
+        Args:
+            stats_summary: Formatted statistical results
+            domain: Domain context
+            goal: Analysis goal
+            
+        Returns:
+            Prompt string
+        """
+        return f"""You are a data analyst expert. Analyze statistical results and provide insights.
+
+Domain: {domain}
+Goal: {goal}
+
+Statistical Analysis:
+{stats_summary}
+
+Based on this analysis, provide:
+
+1. **Key Insights** (3-5 bullet points):
+   - What are the most important findings?
+   - What patterns or relationships stand out?
+   - What is surprising or noteworthy?
+
+2. **Recommendations** (3-5 actionable items):
+   - What actions should be taken based on these findings?
+   - How can these insights be leveraged?
+   - What should be prioritized?
+
+3. **Concerns or Risks** (2-3 points):
+   - What potential issues should be monitored?
+   - What assumptions should be validated?
+   - What limitations exist in the data?
+
+Be specific, actionable, and data-driven. Reference actual numbers from the statistics.
+
+Generate JSON:
+
+{{
+  "insights": [
+    "Key insight 1 with numbers",
+    "Key insight 2 with numbers",
+    "Key insight 3 with numbers"
+  ],
+  "recommendations": [
+    "Action 1",
+    "Action 2",
+    "Action 3"
+  ],
+  "concerns": [
+    "Risk or issue 1",
+    "Risk or issue 2"
+  ]
+}}
+
+Return ONLY valid JSON.
+"""
+
+class ReportPrompts:
+    """Prompts for report generation"""
+    
+    @staticmethod
+    def answer_generation_prompt(
+        question: str,
+        statistics: str,
+        insights: str,
+        has_chart: bool,
+        format_type: str = "text"
+    ) -> str:
+        """
+        Prompt for generating final quiz answer
+        
+        Args:
+            question: Original quiz question
+            statistics: Statistical results
+            insights: Analysis insights
+            has_chart: Whether a chart is included
+            format_type: Output format
+            
+        Returns:
+            Prompt string
+        """
+        
+        chart_text = ""
+        if has_chart:
+            chart_text = "\n\nNote: A chart has been generated and will be embedded in the answer."
+        
+        return f"""You are answering a quiz question. Generate a clear, complete, and well-structured answer.
+
+Quiz Question: "{question}"
+
+Statistical Results:
+{statistics}
+
+Analysis Insights:
+{insights}{chart_text}
+
+Your task: Generate a comprehensive answer that:
+
+1. **Directly answers the question** in the first sentence
+2. **Provides supporting evidence** from the statistics
+3. **Includes key insights** and findings
+4. **Gives actionable recommendations** if applicable
+5. **Is well-organized** and easy to read
+
+Format: {format_type}
+
+Requirements:
+- Start with a direct answer (1-2 sentences)
+- Use bullet points for clarity
+- Reference specific numbers from statistics
+- Be concise but complete
+- Professional tone
+- No speculation - only data-driven conclusions
+
+Generate the answer now:
+"""
+
 
 class PromptTemplates:
     """Prompt templates for various operations"""

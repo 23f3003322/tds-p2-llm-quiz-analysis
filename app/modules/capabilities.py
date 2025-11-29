@@ -72,6 +72,17 @@ class DataSourceCapability:
         requires_browser=False
     )
 
+class VisualizationCapability:
+    """Visualization capabilities"""
+    
+    CHART = ModuleCapability(
+        module_type=ModuleType.VISUALIZER,
+        supported_input_formats={'json', 'csv'},
+        supported_output_formats={'png', 'svg', 'base64'},
+        can_handle_javascript=False,
+        requires_browser=False
+    )
+
 
 class ProcessingCapability:
     """Capability definitions for data processing modules"""
