@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 FROM mcr.microsoft.com/playwright/python:v1.40.0-focal
 
-RUN useradd -m -u 1000 user
+RUN useradd -m -u 1001 user
 
 WORKDIR /home/user/app
 
