@@ -4,6 +4,9 @@ Fetches and extracts task descriptions from URLs
 """
 
 import httpx
+from pathlib import Path
+import tempfile
+from urllib.parse import urljoin
 import json
 import re
 from typing import Optional, Dict, Any, List
@@ -117,53 +120,100 @@ class TaskFetcher:
         }
 
         return result
-        # analysis = await self._analyze_content_with_llm(
-        #     task_description=content['task_description'],
-        #     raw_content=content['raw_content'],
-        #     url=url,
-        #     base_url=base_url
-        # )
+       
+    async def _download_files(
+        self,
+        file_links: List[Dict[str, str]],
+        base_url: str,
+        user_email: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Download files referenced in question.
         
-        # # Merge content + analysis
-        # result = {
-        #     **content,
-        #     'is_redirect': analysis.is_redirect,
-        #     'question_url': analysis.question_url,
-        #     'submission_url': analysis.submission_url,
-        #     'instructions': self._format_instructions(analysis.instructions),
-        #     'overall_goal': analysis.overall_goal,
-        #     'complexity': analysis.complexity,
-        #     'llm_analysis': {
-        #         'redirect_reasoning': analysis.redirect_reasoning,
-        #         'submission_reasoning': analysis.submission_reasoning,
-        #         'confidence': analysis.confidence,
-        #     }
-        # }
+        Args:
+            file_links: List of dicts with 'href' and 'text'
+                Example: [{'href': '/project2/messy.csv', 'text': 'messy.csv'}]
+            base_url: Base URL to construct absolute URLs
+            user_email: User email for personalized URLs
         
-        # # Resolve relative submission URL if needed
-        # if analysis.submission_url and analysis.submission_url_is_relative:
-        #     absolute = str(httpx.URL(base_url).join(analysis.submission_url))
-        #     logger.info(f"✓ Resolved relative submission URL: {analysis.submission_url} → {absolute}")
-        #     result['submission_url'] = absolute
+        Returns:
+            List of dicts with file info:
+                - url: Original URL
+                - local_path: Path to downloaded file
+                - filename: Extracted filename
+                - size: File size in bytes
+                - type: File extension (.csv, .json, etc.)
+        """
+        if not file_links:
+            return []
         
-        # # Resolve relative question URL if needed
-        # if analysis.question_url and analysis.question_url.startswith('/'):
-        #     absolute_q = str(httpx.URL(base_url).join(analysis.question_url))
-        #     logger.info(f"✓ Resolved relative question URL: {analysis.question_url} → {absolute_q}")
-        #     result['question_url'] = absolute_q
+        downloaded_files = []
         
-        # logger.info("✅ Analysis complete:")
-        # logger.info(f"   Is Redirect: {result['is_redirect']}")
-        # logger.info(f"   Submission URL: {result['submission_url']}")
-        # logger.info(f"   Instructions: {len(result['instructions'])} steps")
-        # logger.info(f"   Complexity: {result['complexity']}")
+        # Create download directory
+        download_dir = Path(tempfile.gettempdir()) / "quiz_files"
+        download_dir.mkdir(exist_ok=True)
         
-        # return result
-
-    # ======================================================================
-    # FETCHING WITH FALLBACK TO DYNAMIC SCRAPER
-    # ======================================================================
-
+        logger.info(f"📥 Downloading {len(file_links)} files to {download_dir}")
+        
+        for link in file_links:
+            href = link['href']
+            
+            try:
+                # Handle personalized URLs
+                # Example: "/project2/uv.json?email=<your email>"
+                if '<your email>' in href and user_email:
+                    href = href.replace('<your email>', user_email)
+                    logger.debug(f"Personalized URL: {href}")
+                
+                # Construct absolute URL
+                full_url = urljoin(base_url, href)
+                
+                # Extract filename
+                # "/project2/messy.csv" -> "messy.csv"
+                # "/project2/data.json?email=x@y.com" -> "data.json"
+                filename = Path(href.split('?')[0]).name
+                local_path = download_dir / filename
+                
+                # Download file
+                logger.info(f"  Downloading: {filename} from {full_url}")
+                
+                # Use existing httpx client if available, or create new one
+                if hasattr(self, 'client') and self.client:
+                    response = await self.client.get(full_url, timeout=60.0)
+                else:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(full_url, timeout=60.0)
+                
+                response.raise_for_status()
+                
+                # Save to disk
+                with open(local_path, 'wb') as f:
+                    f.write(response.content)
+                
+                # Get file info
+                file_info = {
+                    'url': full_url,
+                    'local_path': str(local_path),
+                    'filename': filename,
+                    'size': len(response.content),
+                    'type': local_path.suffix  # .csv, .json, .png, etc.
+                }
+                
+                downloaded_files.append(file_info)
+                logger.info(f"  ✓ Downloaded: {filename} ({file_info['size']} bytes)")
+                
+            except httpx.HTTPStatusError as e:
+                logger.error(f"  ✗ HTTP error downloading {href}: {e.response.status_code}")
+                # Continue with other files
+                
+            except Exception as e:
+                logger.error(f"  ✗ Failed to download {href}: {e}")
+                # Continue with other files
+        
+        logger.info(f"✓ Downloaded {len(downloaded_files)}/{len(file_links)} files")
+        
+        return downloaded_files
+    
     async def _fetch_content(self, url: str) -> Dict[str, Any]:
         """
         Fetch content from URL.
