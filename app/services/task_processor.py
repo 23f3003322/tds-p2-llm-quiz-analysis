@@ -5,14 +5,16 @@ Simplified with unified LLM analysis in task_fetcher + AnswerSubmitter integrati
 
 from typing import Dict, Any, Optional
 import asyncio
-from app.models.request import TaskRequest
+from app.models.request import ManualTriggeredRequestBody
 from app.core.logging import get_logger
 from app.core.exceptions import TaskProcessingError
 from app.orchestrator.orchestrator_engine import OrchestratorEngine
 from app.modules import get_fully_loaded_registry  # ✅ AUTO-REGISTRATION
 from app.services.task_fetcher import TaskFetcher
 from app.modules.submitters.answer_submitter import AnswerSubmitter  # ✅ NEW
-
+from app.services.answer_generator import AnswerGenerator
+from app.utils.llm_client import get_llm_client
+from app.utils.submit_answer import submit_answer
 logger = get_logger(__name__)
 
 class TaskProcessor:
@@ -28,13 +30,15 @@ class TaskProcessor:
         # ✅ AUTO-REGISTER ALL MODULES
         self.registry = get_fully_loaded_registry()
         self.answer_submitter = AnswerSubmitter()
+        self.llm_client = get_llm_client()
+        self.answer_generator = AnswerGenerator(self.llm_client)
         
         # Initialize orchestrator engine
         self.orchestrator = OrchestratorEngine(self.registry)
         
         logger.info(f"✅ TaskProcessor initialized with {len(self.registry.modules)} modules")
     
-    async def process(self, task_data: TaskRequest) -> Dict[str, Any]:
+    async def process(self, task_data: ManualTriggeredRequestBody) -> Dict[str, Any]:
         """
         Process TDS quiz task - COMPLETE END-TO-END FLOW
         
@@ -47,7 +51,7 @@ class TaskProcessor:
         6. Build response
         """
         logger.info("=" * 80)
-        logger.info(f"🔄 Processing task for: {task_data.email}")
+        # logger.info(f"🔄 Processing task for: {task_data.email}")
         logger.info(f"📋 Request URL: {task_data.url}")
         logger.info("=" * 80)
         
@@ -65,101 +69,31 @@ class TaskProcessor:
             
             # ✅ FIXED: Use proper async context manager pattern
             async with TaskFetcher() as fetcher:
-                analysis = await fetcher.fetch_and_analyze(url=request_url)
+                result = await fetcher.fetch_and_analyze(url=request_url)
+                print("========")
+                print("analysis")
+                print(result)
+            # Initialize answer generator if needed
+            if not getattr(self.answer_generator, "_generator_agent", None):
+                await self.answer_generator.initialize()
             
-            logger.info(f"✓ Request URL analyzed")
-            logger.info(f"  Submission URL: {analysis.get('submission_url')}")
-            
-            # Extract key information
-            task_description = analysis['task_description']
-            submission_url = analysis.get('submission_url') 
-            instructions = analysis.get('instructions', [])
-            question_url = request_url  # Default to request URL
-            
-            logger.info(f"📍 Submission URL: {submission_url}")
-            logger.info(f"📋 Instructions: {len(instructions)} steps")
-            
-            # ===================================================================
-            # STEP 2: EXECUTE ORCHESTRATION (Scrape → Extract → Answer)
-            # ===================================================================
-            logger.info("\n" + "=" * 80)
-            logger.info("STEP 2: EXECUTING ORCHESTRATION")
-            logger.info("=" * 80)
-            
-            orchestration_result = await self.orchestrator.execute_task(
-                task_input=task_description,
-                task_url=question_url,
-                context={
-                    'email': task_data.email,
-                    'request_url': request_url,
-                    'question_url': question_url,
-                    'submission_url': submission_url,
-                    'instructions': instructions
-                }
+            answer = await self.answer_generator.generate(
+                analysis=result["analysis"],
+                question_metadata=result["question_metadata"],
+                base_url=result["base_url"],
+                user_email=result["user_email"],
+                downloaded_files=result["downloaded_files"]
+            )
+            print("================================= answer")
+            print(answer)
+
+            return submit_answer(
+                submit_url="https://tds-llm-analysis.s-anand.net/submit",
+                answer=answer,
+                req_url=request_url,
+                background_tasks=None
             )
             
-            logger.info(f"✓ Orchestration completed")
-            logger.info(f"  Success: {orchestration_result['success']}")
-            
-            # ===================================================================
-            # STEP 3: EXTRACT ANSWER
-            # ===================================================================
-            answer = self._extract_answer(orchestration_result)
-            logger.info(f"✓ Answer extracted: {str(answer)[:100]}")
-
-            if not answer or answer == "No answer found":
-                logger.warning("⚠️ No valid answer extracted")
-                return self._build_response(
-                    task_data, request_url, question_url, submission_url, 
-                    analysis, orchestration_result, None, answer
-                )
-
-            # ===================================================================
-            # STEP 4: SUBMIT ANSWER & HANDLE CHAINING
-            # ===================================================================
-            logger.info("\n" + "=" * 80)
-            logger.info("STEP 4: SUBMITTING & CHAINING")
-            logger.info("=" * 80)
-
-            submission_result = await self.answer_submitter.execute({
-                'submission_url': submission_url,
-                'email': task_data.email,
-                'secret': str(answer),
-                'quiz_url': question_url,
-                'answer': answer
-            })
-
-            logger.info(f"✓ Submission completed: {getattr(submission_result, 'success', False)}")
-
-            # ✅ ALWAYS check for new URL first
-            if (hasattr(submission_result, 'data') and 
-                submission_result.data and 
-                (next_url := submission_result.data.get('next_quiz_url'))):
-                
-                logger.info(f"🔄 NEW QUIZ DETECTED: {next_url}")
-
-                # ✅ FIXED: Proper background task handling with reference tracking
-                background_tasks = set()
-                task = asyncio.create_task(self._process_chained_quiz(task_data.email, next_url, submission_url))
-                background_tasks.add(task)
-                task.add_done_callback(background_tasks.discard)
-
-                return {
-                    'success': True,
-                    'status': 'chained',
-                    'message': f'Submitted & chained to next quiz: {next_url}',
-                    'next_url': next_url,
-                    'correct': submission_result.data.get('correct', False)
-                }
-
-            # ✅ No new URL = SUCCESS (whether correct or not)
-            logger.info("✅ No new quiz - Task completed successfully")
-            return {
-                'success': True,
-                'status': 'completed',
-                'message': 'Answer submitted successfully to TDS',
-                'correct': getattr(submission_result, 'data', {}).get('correct', False)
-            }
             
         except Exception as e:
             logger.error(f"❌ Task processing failed: {str(e)}", exc_info=True)
@@ -226,7 +160,7 @@ class TaskProcessor:
     
     def _build_response(
         self, 
-        task_data: TaskRequest, 
+        task_data: ManualTriggeredRequestBody, 
         request_url: str, 
         question_url: str, 
         submission_url: str, 

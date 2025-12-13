@@ -41,3 +41,13 @@ Thumbs.db
 
 new.txt
 .DS_Store
+
+
+analysis.md
+data_fetching.md
+dynamic_scraper.md
+orchestrator.md
+questions.md
+task_processor.md
+unified.md
+

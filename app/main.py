@@ -29,13 +29,13 @@ async def lifespan(app: FastAPI):
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info("=" * 80)
     import os
-    if os.getenv('ENVIRONMENT') == 'production':
-        from app.modules.scrapers.browser_pool import get_pooled_browser
-        from app.modules.scrapers.browser_config import PRODUCTION_CONFIG
+    # if os.getenv('ENVIRONMENT') == 'production':
+    #     from app.modules.scrapers.browser_pool import get_pooled_browser
+    #     from app.modules.scrapers.browser_config import PRODUCTION_CONFIG
         
-        logger.info("Pre-warming browser pool...")
-        await get_pooled_browser(PRODUCTION_CONFIG)
-        logger.info("✓ Browser pool ready")
+    #     logger.info("Pre-warming browser pool...")
+    #     await get_pooled_browser(PRODUCTION_CONFIG)
+    #     logger.info("✓ Browser pool ready")
 
     yield
     
@@ -57,8 +57,8 @@ def create_application() -> FastAPI:
         description=settings.APP_DESCRIPTION,
         version=settings.APP_VERSION,
         lifespan=lifespan,
-        docs_url="/docs" if settings.ENVIRONMENT == "development" else None,
-        redoc_url="/redoc" if settings.ENVIRONMENT == "development" else None,
+        # docs_url="/docs" if settings.ENVIRONMENT == "development" else None,
+        # redoc_url="/redoc" if settings.ENVIRONMENT == "development" else None,
     )
     
     # Configure CORS
@@ -76,7 +76,7 @@ def create_application() -> FastAPI:
     # Register exception handlers
     register_exception_handlers(app)
     registry = register_all_modules()
-    orchestrator = OrchestratorEngine(registry)
+    # orchestrator = OrchestratorEngine(registry)
     
     # Include routers
     app.include_router(health.router, tags=["Health"])

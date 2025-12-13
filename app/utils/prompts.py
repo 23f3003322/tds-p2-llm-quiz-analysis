@@ -133,6 +133,259 @@ class AnalysisPrompts:
     Now analyze the content above."""
 
     @staticmethod
+    def question_analysis_prompt(
+        instructions: List[str],
+        difficulty: int,
+        is_personalized: bool,
+        title: str,
+        heading: str,
+        base_url: str,
+        user_email: str,
+        available_files: List[Dict[str, Any]]
+    ) -> str:
+            """
+            Generate prompt for analyzing question.
+            Focused on extracting what's needed to generate the answer.
+            """
+            
+            files_text = "\n".join(
+                f"- {f.get('filename', 'unknown')} ({f.get('type', 'unknown')})"
+                for f in available_files
+            ) if available_files else "None"
+            
+            instructions_text = "\n".join(
+                f"{i+1}. {inst}" 
+                for i, inst in enumerate(instructions)
+            )
+            
+            return f"""Analyze this technical quiz question to determine how to generate the correct answer.
+
+    # QUESTION METADATA
+    - **Title**: {title}
+    - **Heading**: {heading}
+    - **Difficulty**: {difficulty}/5 (1=easiest, 5=hardest)
+    - **Personalized**: {is_personalized}
+    - **Base URL**: {base_url}
+    - **User Email**: {user_email}
+
+    # INSTRUCTIONS
+    {instructions_text}
+
+    # AVAILABLE FILES
+    {files_text}
+
+    ---
+
+    # YOUR ANALYSIS TASK
+
+    Extract the following information to enable answer generation:
+
+    ## 1. QUESTION TYPE
+    Categorize the task:
+    - **cli_command**: Generate command strings (uv, git, curl, docker)
+    - **file_path**: Return file paths or URLs
+    - **data_processing**: Process CSV/JSON/ZIP files
+    - **image_analysis**: Analyze images (colors, pixels, differences)
+    - **audio_transcription**: Transcribe audio to text
+    - **api_interaction**: Make API calls (GitHub, REST APIs)
+    - **document_parsing**: Extract data from PDFs
+    - **calculation**: Mathematical computations (sums, F1 scores)
+    - **text_generation**: Generate YAML, prompts, configuration
+    - **optimization**: Solve constraint/optimization problems
+    - **llm_reasoning**: Multi-step reasoning or tool planning
+
+    ## 2. ANSWER FORMAT
+    How should the final answer be formatted?
+    - **plain_string**: Raw text, no quotes, no JSON (e.g., "uv http get ...")
+    - **json_object**: JSON dictionary (e.g., {{"key": "value"}})
+    - **json_array**: JSON list (e.g., ["a", "b", "c"])
+    - **number**: Integer or float (e.g., 42 or 3.14)
+    - **single_letter**: One character (e.g., A, B, or C)
+
+    ## 3. KEY COMPONENTS
+    Extract specific data needed to generate the answer:
+
+    **For cli_command:**
+    - tool: "uv", "git", "curl"
+    - subcommand: "http get", "add", "commit"
+    - url_template: Pattern with placeholders
+    - flags: ["-H", "-m", "-p"]
+    - arguments: Headers, messages, parameters
+
+    **For file_path:**
+    - path: Exact path or pattern
+
+    **For data_processing:**
+    - operations: ["normalize", "filter", "aggregate"]
+    - output_format: "json", "csv"
+    - sorting: Field and direction
+
+    **For calculations:**
+    - formula: Mathematical expression
+    - input_sources: Where data comes from
+    - precision: Decimal places
+
+    **For any type:**
+    - Any other relevant details from instructions
+
+    ## 4. PERSONALIZATION
+    Determine if answer depends on user's email:
+
+    **Types:**
+    - **email_in_url**: Email appears in URL (e.g., ?email={{user_email}})
+    - **email_length_offset**: offset = len(email) mod N, add to result
+    - **email_length_conditional**: Different answer based on email length (even/odd)
+
+    **Details:**
+    - Which mod value? (mod 2, mod 3, mod 5)
+    - How to apply? (add to result, choose option)
+
+    ## 5. FILE REQUIREMENTS
+    Does the question need files from available_files list?
+    - Which file types? (csv, json, png, pdf, opus, zip)
+    - What to do with them? (process, analyze, extract)
+
+    ## 6. EXTERNAL RESOURCES
+    Does the question require fetching from another URL/endpoint?
+    - API endpoints mentioned in instructions
+    - Data sources not in available_files
+    - Example: "Use GitHub API with params in /project2/gh-tree.json"
+
+    ## 7. CRITICAL CONSTRAINTS
+    Extract must-follow rules:
+    - "command string" not "command output"
+    - Exact decimal places (2, 4)
+    - Sorting order (ascending, descending)
+    - Case sensitivity (lowercase, uppercase)
+    - Separators (comma, space, newline)
+    - Quote style ("double", 'single', none)
+    - No markdown formatting
+    - Specific value ranges
+
+    ## 8. SUBMISSION URL PATH
+    The URL path for THIS specific question (from title/heading).
+    Pattern: /project2-{{question-name}}
+    Example: /project2-uv, /project2-git, /project2-md
+
+    ---
+
+    # EXAMPLES
+
+    ## Example 1: CLI Command (Q2-like)
+
+    **Instructions:**
+    1. Craft the command string using uv http get on {{{{base_url}}}}/project2/uv.json?email=<your email>
+    2. Include header Accept: application/json
+    3. POST that exact command string as answer
+
+    **Analysis:**
+    {{
+"question_type": "cli_command",
+"answer_format": "plain_string",
+"key_components": {{
+"tool": "uv",
+"subcommand": "http get",
+"url_template": "{{{{base_url}}}}/project2/uv.json?email={{{{user_email}}}}",
+"headers": [{{"name": "Accept", "value": "application/json"}}],
+"header_flag": "-H"
+}},
+"requires_personalization": true,
+"personalization_type": "email_in_url",
+"personalization_details": "User email in URL query parameter",
+"requires_files": false,
+"required_file_types": [],
+"requires_external_fetch": false,
+"external_resources": [],
+"critical_constraints": [
+"Return command string only, not output",
+"Use double quotes for header value",
+"Format: tool subcommand url -H \"header: value\""
+],
+"submission_url_path": "/project2-uv",
+"reasoning": "Instructions explicitly ask for 'command string' using specific tool and parameters",
+"confidence": 0.98
+}}
+
+text
+
+## Example 2: File Path (Q4-like)
+
+**Instructions:**
+1. The correct relative link target is exactly /project2/data-preparation.md
+2. Submit that exact string. Do not wrap in Markdown/HTML
+
+**Analysis:**
+{{
+"question_type": "file_path",
+"answer_format": "plain_string",
+"key_components": {{
+"path": "/project2/data-preparation.md"
+}},
+"requires_personalization": false,
+"requires_files": false,
+"requires_external_fetch": false,
+"critical_constraints": [
+"Exact string: /project2/data-preparation.md",
+"No markdown formatting",
+"No HTML tags",
+"No quotes"
+],
+"submission_url_path": "/project2-md",
+"reasoning": "Instructions provide exact path to return",
+"confidence": 1.0
+}}
+
+text
+
+## Example 3: Data Processing with Personalization (Q9-like)
+
+**Instructions:**
+1. Download logs.zip and sum bytes where event=="download"
+2. Compute offset = (length of your email) mod 5
+3. Final answer = base sum + offset
+
+**Available Files:**
+- logs.zip (zip)
+
+**Analysis:**
+{{
+"question_type": "data_processing",
+"answer_format": "number",
+"key_components": {{
+"file": "logs.zip",
+"operation": "sum",
+"field": "bytes",
+"filter": {{"event": "download"}},
+"offset_formula": "len(user_email) mod 5"
+}},
+"requires_personalization": true,
+"personalization_type": "email_length_offset",
+"personalization_details": "Add (len(email) mod 5) to base sum",
+"requires_files": true,
+"required_file_types": ["zip"],
+"requires_external_fetch": false,
+"critical_constraints": [
+"Filter: event == 'download'",
+"Sum the bytes field",
+"Add email length offset",
+"Return integer only"
+],
+"submission_url_path": "/project2-logs",
+"reasoning": "File processing with email-based offset calculation",
+"confidence": 0.92
+}}
+
+text
+
+---
+
+# NOW ANALYZE
+
+Analyze the question above and return a complete QuestionAnalysis object.
+Be precise and extract ALL relevant details from the instructions.
+"""
+
+    @staticmethod
     def analysis_planning_prompt(
         question: str,
         schema_text: str,

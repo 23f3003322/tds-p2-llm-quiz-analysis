@@ -26,6 +26,7 @@ class ScraperResult(BaseModel):
     encoding: str = "utf-8"
     response_time: float = 0.0
     status_code: int = 200
+    raw_html: Optional[str] = None
     
     # Scraping details
     selectors_used: List[str] = Field(default_factory=list)
@@ -34,6 +35,14 @@ class ScraperResult(BaseModel):
     # Errors and warnings
     error: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
+    
+    def __post_init__(self):
+        if self.data is None:
+            self.data = []
+        if self.columns_extracted is None:
+            self.columns_extracted = []
+        if self.selectors_used is None:
+            self.selectors_used = []
     
     class Config:
         arbitrary_types_allowed = True

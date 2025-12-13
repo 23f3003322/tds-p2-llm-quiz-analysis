@@ -7,6 +7,14 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+class SubmissionBody(BaseModel):
+    """Request body format for quiz submission"""
+    email: str
+    secret: str
+    url: str
+    answer: int
+
+
 class ImmediateResponse(BaseModel):
     """
     Immediate response sent after validation
@@ -19,10 +27,7 @@ class ImmediateResponse(BaseModel):
     message: str = Field(
         description="Status message"
     )
-    
-    email: str = Field(
-        description="Student email from request"
-    )
+
     
     task_url: str = Field(
         description="Task URL from request"

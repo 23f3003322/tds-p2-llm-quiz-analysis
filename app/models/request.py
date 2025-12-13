@@ -7,6 +7,12 @@ from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, EmailStr, HttpUrl, validator
 
 
+class ManualTriggeredRequestBody(BaseModel):
+    """Request body format for quiz submission"""
+    url: str
+
+
+
 class TaskRequest(BaseModel):
     """
     Schema for task request validation
