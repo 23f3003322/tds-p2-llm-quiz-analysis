@@ -5,6 +5,7 @@ from app.core.logging import get_logger
 from app.core.exceptions import AnswerGenerationError
 from app.models.answer import AnswerResult
 from app.models.analysis import QuestionAnalysis
+from app.services.audio_processor import AudioProcessor
 logger = get_logger(__name__)
 
 
@@ -21,6 +22,7 @@ class AnswerGenerator:
         """
         self.llm_client = llm_client
         self._generator_agent = None
+        self.audio_processor = AudioProcessor() 
     
     async def initialize(self):
         """Initialize LLM agent for answer generation"""
@@ -63,6 +65,35 @@ class AnswerGenerator:
         logger.info(f"💡 Generating answer for {analysis.question_type}...")
         
         try:
+            if analysis.question_type == 'audio_transcription':
+                logger.info("🎤 Audio transcription task detected")
+                
+                # Find audio file
+                audio_file = next(
+                    (f for f in downloaded_files 
+                     if f['type'] in ['.opus', '.mp3', '.wav', '.m4a', '.ogg']),
+                    None
+                )
+                
+                if not audio_file:
+                    raise AnswerGenerationError(
+                        "Audio file not found. Expected .opus, .mp3, or .wav file."
+                    )
+                
+                logger.info(f"  Found audio file: {audio_file['filename']}")
+                
+                # Transcribe audio
+                answer = await self.audio_processor.transcribe_audio(
+                    audio_file_path=audio_file['local_path'],
+                    language='en',  # English for Q5
+                    lowercase=True  # Q5 requires lowercase
+                )
+                
+                logger.info(f"✓ Audio transcribed successfully")
+                logger.info(f"  Answer: {answer}")
+                
+                return answer
+            
             # Step 1: Build comprehensive context for LLM
             context = self._build_generation_context(
                 analysis=analysis,
