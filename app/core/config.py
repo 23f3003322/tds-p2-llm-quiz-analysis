@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     
     # Security
     API_SECRET: str = Field(default="", env="API_SECRET")
+    USER_EMAIL: str = Field(default="", env="USER_EMAIL")
     ALLOWED_ORIGINS: List[str] = Field(default=["*"], env="ALLOWED_ORIGINS")
     
     # Logging

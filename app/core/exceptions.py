@@ -19,6 +19,10 @@ class TaskProcessingError(Exception):
     """Raised when task processing fails"""
     pass
 
+class AnswerGenerationError(Exception):
+    """Raised when answer generation fails"""
+    pass
+
 
 class AuthenticationError(Exception):
     """Raised when authentication fails"""

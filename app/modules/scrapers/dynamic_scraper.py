@@ -154,6 +154,7 @@ class DynamicScraper(BaseScraper):
     wait_for: Optional[str] = None,
     click_selectors: List[str] = None,
     scroll: bool = False,
+    return_html: bool = True,
     take_screenshot: bool = False,
     **kwargs
 ) -> ScraperResult:
@@ -209,7 +210,7 @@ class DynamicScraper(BaseScraper):
                         url=url,
                         error="Failed to load page"
                     )
-                
+
                 status_code = response.status
                 logger.info(f"Page loaded | Status: {status_code}")
                 
@@ -246,6 +247,15 @@ class DynamicScraper(BaseScraper):
                 else:
                     data = await self._extract_auto(page)
                 
+                if selectors:
+                    data = await self._extract_with_selectors(page, selectors)
+                else:
+                    data = await self._extract_auto(page)
+
+                rendered_html = None
+                if return_html:
+                    rendered_html = await page.content()
+                
                 # Build result
                 columns = list(data[0].keys()) if data else []
                 
@@ -257,6 +267,8 @@ class DynamicScraper(BaseScraper):
                     columns_extracted=columns,
                     status_code=status_code,
                     selectors_used=list(selectors.keys()) if selectors else []
+                    ,
+                    raw_html=rendered_html 
                 )
                 
                 logger.info(f"✓ Scraped {len(data)} rows with browser")

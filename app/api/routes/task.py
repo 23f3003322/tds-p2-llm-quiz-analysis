@@ -5,14 +5,16 @@ Handles task submission and processing
 
 from fastapi import APIRouter, Request, status, BackgroundTasks, HTTPException
 from datetime import datetime
-from typing import Dict, Any
+# from typing import Dict, Any
 
-from app.models.request import TaskRequest
-from app.models.response import TaskResponse, ImmediateResponse
+from app.models.request import ManualTriggeredRequestBody
+from app.models.response import ImmediateResponse
 from app.core.logging import get_logger
-from app.core.security import verify_authentication, AuthenticationError
+# from app.core.security import verify_authentication, AuthenticationError
 from app.core.exceptions import TaskProcessingError
 from app.services.task_processor import TaskProcessor
+
+import requests
 
 logger = get_logger(__name__)
 
@@ -36,18 +38,7 @@ async def handle_task(
     request: Request,
     background_tasks: BackgroundTasks
 ):
-    """
-    Main API endpoint for handling task requests
-    
-    Flow:
-    1. Validate JSON format (HTTP 400 if invalid)
-    2. Verify secret (HTTP 403 if invalid)
-    3. Respond immediately with HTTP 200
-    4. Process task in background
-    
-    Returns:
-        Immediate HTTP 200 response with task accepted message
-    """
+   
     start_time = datetime.now()
     
     logger.info("📥 Task request received")
@@ -58,13 +49,13 @@ async def handle_task(
         # ================================================================
         try:
             body = await request.json()
-            task_data = TaskRequest(**body)
-        except ValueError as e:
-            logger.error(f"❌ Invalid JSON format: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid JSON format: {str(e)}"
-            )
+            task_data = ManualTriggeredRequestBody(**body)
+        # except ValueError as e:
+        #     logger.error(f"❌ Invalid JSON format: {str(e)}")
+        #     raise HTTPException(
+        #         status_code=status.HTTP_400_BAD_REQUEST,
+        #         detail=f"Invalid JSON format: {str(e)}"
+        #     )
         except Exception as e:
             logger.error(f"❌ Request validation failed: {str(e)}")
             raise HTTPException(
@@ -72,28 +63,26 @@ async def handle_task(
                 detail=f"Invalid request data: {str(e)}"
             )
         
-        logger.info(f"✅ Request validated for: {task_data.email}")
         
-        # ================================================================
-        # STEP 2: VERIFY AUTHENTICATION (HTTP 403 if invalid)
-        # ================================================================
-        logger.info("🔐 Verifying authentication")
-        try:
-            verify_authentication(task_data.secret)
-        except AuthenticationError as e:
-            logger.error(f"❌ Authentication failed: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid secret. Authentication failed."
-            )
+        # # ================================================================
+        # # STEP 2: VERIFY AUTHENTICATION (HTTP 403 if invalid)
+        # # ================================================================
+        # logger.info("🔐 Verifying authentication")
+        # try:
+        #     verify_authentication(task_data.secret)
+        # except AuthenticationError as e:
+        #     logger.error(f"❌ Authentication failed: {str(e)}")
+        #     raise HTTPException(
+        #         status_code=status.HTTP_403_FORBIDDEN,
+        #         detail="Invalid secret. Authentication failed."
+        #     )
         
-        logger.info("✅ Authentication successful")
+        # logger.info("✅ Authentication successful")
         
         # ================================================================
         # STEP 3: RESPOND IMMEDIATELY WITH HTTP 200
         # ================================================================
         logger.info("✅ Request accepted - processing in background")
-        
         # Add task processing to background
         background_tasks.add_task(
             process_task_background,
@@ -105,7 +94,6 @@ async def handle_task(
         response = ImmediateResponse(
             success=True,
             message="Task accepted and processing started",
-            email=task_data.email,
             task_url=str(task_data.url),
             status="processing",
             timestamp=datetime.now().isoformat()
@@ -127,8 +115,11 @@ async def handle_task(
         )
 
 
+
+
+
 async def process_task_background(
-    task_data: TaskRequest,
+    task_data: ManualTriggeredRequestBody,
     start_time: datetime
 ):
     """
@@ -149,7 +140,7 @@ async def process_task_background(
     try:
         # Process the task
         result_data = await task_processor.process(task_data)
-        
+
         # Calculate execution time
         execution_time = (datetime.now() - start_time).total_seconds()
         
